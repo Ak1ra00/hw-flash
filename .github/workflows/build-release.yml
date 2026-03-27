@@ -23,16 +23,15 @@ jobs:
 
     - uses: actions/checkout@v4
 
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
     - name: Install PlatformIO
-      run: pip install platformio
+      run: |
+        python3 -m pip install --upgrade pip
+        pip install --break-system-packages platformio
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Build firmware
       working-directory: atlantis-deepsea
-      run: python3 -m platformio run
+      run: platformio run
 
     - name: Collect boot_app0.bin from PlatformIO packages
       run: |
