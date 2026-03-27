@@ -35,6 +35,33 @@ Derive unlimited, deterministic passwords from a single BIP39 seed phrase — fu
 
 ---
 
+## Flashing
+
+> 📖 **Full step-by-step guide → [FLASHING.md](FLASHING.md)**
+>
+> Covers macOS and Windows, USB driver install, port detection, and troubleshooting.
+
+**Quick start:**
+
+```bash
+# macOS / Linux
+git clone https://github.com/ak1ra00/hw-flash
+cd hw-flash/atlantis-deepsea
+chmod +x flash.sh
+./flash.sh
+```
+
+```bat
+REM Windows
+git clone https://github.com/ak1ra00/hw-flash
+cd hw-flash\atlantis-deepsea
+flash.bat COM3
+```
+
+PlatformIO is installed automatically if missing.
+
+---
+
 ## Security model
 
 - Seed converted to BIP32 master key via `bip39_to_seed` (PBKDF2-SHA512, 2048 iterations)
@@ -44,34 +71,7 @@ Derive unlimited, deterministic passwords from a single BIP39 seed phrase — fu
 - After 2 minutes idle: device locks and clears key from RAM
 - Flash encryption can be enabled via `idf.py efuse-burn` for physical tamper resistance
 
-> **No secure element.** Keys live in ESP32 flash, encrypted. Physically determined attacker with soldering equipment and significant effort *may* be able to extract flash. Enable ESP32 flash encryption for stronger physical protection.
-
----
-
-## Flashing — Quick Start
-
-### Linux / macOS
-
-```bash
-git clone https://github.com/ak1ra00/hw-flash
-cd hw-flash/atlantis-deepsea
-chmod +x flash.sh
-./flash.sh            # auto-detects port
-# or
-./flash.sh /dev/ttyUSB0
-```
-
-### Windows
-
-```
-flash.bat COM3
-```
-
-### Requirements
-
-- [PlatformIO](https://platformio.org/install/cli) (`pip install platformio`) — installed automatically if missing
-- USB-C cable connected to T-Display
-- On Linux: add yourself to `dialout` group → `sudo usermod -aG dialout $USER`
+> **No secure element.** Keys live in ESP32 flash, encrypted. A physically determined attacker with soldering equipment *may* be able to extract flash. Enable ESP32 flash encryption for stronger physical protection.
 
 ---
 
@@ -120,7 +120,7 @@ PIN entry → Main Menu
 
 ## BIP85 compatibility
 
-Passwords are derived identically to ColdCard's BIP85 implementation:
+Passwords are derived identically to ColdCard’s BIP85 implementation:
 
 ```
 Path:    m/83696968' / 707764' / {length}' / {index}'
@@ -145,7 +145,7 @@ pio device monitor  # serial output (115200 baud)
 
 ## Resetting the device
 
-Hold **BTN1** while powering on → the device will offer a factory reset option that wipes all NVS storage. Your passwords are always recoverable from your seed phrase.
+Hold **BTN1** while powering on → factory reset option wipes all NVS storage. Your passwords are always recoverable from your seed phrase.
 
 ---
 
