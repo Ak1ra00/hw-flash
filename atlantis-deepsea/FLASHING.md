@@ -1,5 +1,19 @@
 # Flashing Guide — Atlantis DeepSea
 
+## Quick Start
+
+**Windows** — download and double-click, no installs needed:
+
+1. Download **[AtlantisDeepSea-Flasher.exe](https://github.com/ak1ra00/hw-flash/releases/latest)**
+2. Plug in your T-Display via USB-C
+3. Double-click the `.exe` — done in ~30 seconds
+
+**macOS** — three commands in Terminal:
+```bash
+git clone https://github.com/ak1ra00/hw-flash
+cd hw-flash/atlantis-deepsea && chmod +x flash.sh && ./flash.sh
+```
+
 ---
 
 ## Windows — Portable .exe (easiest)
