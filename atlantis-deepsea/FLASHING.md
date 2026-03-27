@@ -2,10 +2,22 @@
 
 ## Quick Start
 
+### Step 0 — Put the device in bootloader mode
+
+Do this **before** flashing, especially if the device is already running firmware (Jade, etc.):
+
+1. Hold the **BOOT button** (left button on the front of the T-Display)
+2. While holding BOOT, unplug and replug the USB cable
+3. Release BOOT — the screen goes blank — device is ready to flash
+
+> On a brand-new, never-flashed device you can skip this step.
+
+---
+
 **Windows** — download and double-click, no installs needed:
 
-1. Download **[AtlantisDeepSea-Flasher.exe](https://github.com/ak1ra00/hw-flash/releases/latest)**
-2. Plug in your T-Display via USB-C
+1. Put device in bootloader mode (see above)
+2. Download **[AtlantisDeepSea-Flasher.exe](https://github.com/ak1ra00/hw-flash/releases/latest)**
 3. Double-click the `.exe` — done in ~30 seconds
 
 **macOS** — three commands in Terminal:
@@ -152,7 +164,7 @@ Hard resetting via RTS pin...
 | Problem | Fix |
 |---|---|
 | Device not detected | Install CP210x driver, restart Windows, try again |
-| `Failed to connect to ESP32` | Hold the **BOOT** button while the flasher connects |
+| `Failed to connect to ESP32` | Enter bootloader mode first — see Step 0 above |
 | Nothing happens on double-click | Right-click → **Run as administrator** |
 | SmartScreen blocks the .exe | Click **More info** → **Run anyway** |
 | Wrong COM port | Open **Device Manager → Ports** and check the number |

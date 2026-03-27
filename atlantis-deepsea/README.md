@@ -41,10 +41,19 @@ Derive unlimited, deterministic passwords from a single BIP39 seed phrase — fu
 >
 > Covers macOS and Windows, USB driver install, port detection, and troubleshooting.
 
+**Before flashing — put the device in bootloader mode:**
+
+1. Hold the **BOOT button** (left button on the front of the T-Display)
+2. While holding BOOT, unplug and replug the USB cable
+3. Release BOOT — the screen will go blank (bootloader mode is active)
+
+> This is required if the device is running any existing firmware (Jade, etc.).
+> On a blank/new device you can skip this step.
+
 **Windows (easiest):**
 
 1. Download **[AtlantisDeepSea-Flasher.exe](https://github.com/ak1ra00/hw-flash/releases/latest)** — no installs needed
-2. Plug in your T-Display via USB-C
+2. Plug in your T-Display via USB-C and enter bootloader mode (see above)
 3. Double-click the `.exe` — flashes automatically in ~30 seconds
 
 **macOS / Linux:**
