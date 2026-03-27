@@ -1,6 +1,62 @@
 # Flashing Guide — Atlantis DeepSea
 
-Step-by-step instructions for flashing the firmware onto your LilyGO T-Display on **macOS** and **Windows**.
+---
+
+## Windows — Portable .exe (easiest)
+
+No installs required. Everything is bundled.
+
+### Step 1 — Download the flasher
+
+Go to the [**Releases page**](https://github.com/ak1ra00/hw-flash/releases/latest) and download **`AtlantisDeepSea-Flasher.exe`**.
+
+### Step 2 — Install USB driver (first time only)
+
+The T-Display uses a **CP2102** USB chip. Windows 10/11 usually installs it automatically when you plug in the device. If the device isn't detected, install the driver manually:
+
+1. Go to **[silabs.com/developers/usb-to-uart-bridge-vcp-drivers](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)**
+2. Download **CP210x Windows Drivers**
+3. Extract and run **`CP210xVCPInstaller_x64.exe`**
+4. **Restart Windows**
+
+### Step 3 — Flash
+
+1. Plug in your T-Display via **USB-C**
+2. Double-click **`AtlantisDeepSea-Flasher.exe`**
+3. The flasher auto-detects your device and flashes — done in ~30 seconds
+
+> **Windows SmartScreen warning?**
+> Click **More info** → **Run anyway**.
+> This appears because the file isn't code-signed. The source code is fully open.
+
+---
+
+## Windows — From source (advanced)
+
+Use this if you want to build the firmware yourself from source.
+
+### Prerequisites
+
+1. **Python 3** — [python.org/downloads](https://python.org/downloads)
+   - ⚠️ Check **"Add Python to PATH"** during install
+2. **Git** — [git-scm.com](https://git-scm.com)
+3. **PlatformIO** — open Command Prompt and run:
+   ```
+   pip install platformio
+   ```
+4. **CP210x driver** — see Step 2 above
+
+### Flash
+
+Open Command Prompt:
+
+```
+git clone https://github.com/ak1ra00/hw-flash
+cd hw-flash\atlantis-deepsea
+flash.bat COM3
+```
+
+Replace `COM3` with your actual port (check **Device Manager → Ports**).
 
 ---
 
@@ -8,7 +64,7 @@ Step-by-step instructions for flashing the firmware onto your LilyGO T-Display o
 
 ### Step 1 — Install prerequisites
 
-Open **Terminal** (Spotlight → type "Terminal")
+Open **Terminal** (Spotlight → type "Terminal"):
 
 ```bash
 # Install Homebrew if you don't have it
@@ -21,134 +77,59 @@ brew install python
 pip3 install platformio
 ```
 
-### Step 2 — Install USB driver
-
-The T-Display uses a **CP2102** USB-to-Serial chip.
+### Step 2 — Install USB driver (older macOS only)
 
 - **macOS 12 Monterey and newer** — driver is built-in, skip this step
-- **macOS 11 and older** — download the CP210x driver from Silicon Labs:
+- **macOS 11 and older:**
   1. Google **"CP210x Mac driver Silicon Labs"**
-  2. Download and open the `.dmg`
-  3. Run the installer
-  4. Go to **System Settings → Privacy & Security** and allow the driver if prompted
-  5. **Restart your Mac**
+  2. Download and open the `.dmg`, run the installer
+  3. Go to **System Settings → Privacy & Security** and allow it
+  4. **Restart your Mac**
 
-### Step 3 — Clone the repo
+### Step 3 — Flash
+
+Plug in your T-Display via USB-C, then:
 
 ```bash
 git clone https://github.com/ak1ra00/hw-flash
 cd hw-flash/atlantis-deepsea
-```
-
-### Step 4 — Plug in your T-Display
-
-Connect your LilyGO T-Display via **USB-C**.
-
-### Step 5 — Flash
-
-```bash
 chmod +x flash.sh
 ./flash.sh
 ```
 
-The script auto-detects the port. You'll see:
-
-```
-[*] Auto-detected port: /dev/cu.usbserial-0001
-[*] Building and flashing to /dev/cu.usbserial-0001 ...
-```
-
-If auto-detection fails, find the port manually and pass it:
+The script auto-detects the port. If it fails, pass the port manually:
 
 ```bash
-# List available ports
-ls /dev/cu.*
-
-# Flash to a specific port
-./flash.sh /dev/cu.usbserial-0001
+ls /dev/cu.*                        # find your port
+./flash.sh /dev/cu.usbserial-0001   # use it
 ```
-
----
-
-## Windows
-
-### Step 1 — Install Python 3
-
-1. Go to **[python.org/downloads](https://python.org/downloads)**
-2. Download the latest installer
-3. Run it — ⚠️ **check "Add Python to PATH"** at the bottom of the first screen
-4. Click **Install Now**
-
-### Step 2 — Install Git
-
-1. Go to **[git-scm.com](https://git-scm.com)**
-2. Download and run the installer (all defaults are fine)
-
-### Step 3 — Install PlatformIO
-
-Open **Command Prompt** (Start → type `cmd` → Enter):
-
-```
-pip install platformio
-```
-
-### Step 4 — Install USB driver
-
-1. Google **"CP210x Windows driver Silicon Labs"**
-2. Download `CP210x_Windows_Drivers.zip`
-3. Extract it
-4. Run **`CP210xVCPInstaller_x64.exe`** (or `x86` for 32-bit Windows)
-5. Plug in your T-Display via **USB-C**
-
-### Step 5 — Find your COM port
-
-1. Open **Device Manager** (Start → type `Device Manager`)
-2. Expand **Ports (COM & LPT)**
-3. Look for **Silicon Labs CP210x USB to UART Bridge (COM?)**
-4. Note the COM number — e.g. **COM3**
-
-> If you don't see it, the driver didn't install correctly — retry Step 4.
-
-### Step 6 — Clone the repo
-
-In Command Prompt:
-
-```
-git clone https://github.com/ak1ra00/hw-flash
-cd hw-flash\atlantis-deepsea
-```
-
-### Step 7 — Flash
-
-```
-flash.bat COM3
-```
-
-Replace `COM3` with your actual port number from Step 5.
 
 ---
 
 ## What a successful flash looks like
 
 ```
-Linking .pio/build/lilygo-t-display/firmware.elf
-Building .pio/build/lilygo-t-display/firmware.bin
-esptool.py v4.x  Serial port COM3
+[*] Found: Silicon Labs CP210x USB to UART Bridge  (COM3)
+
+[*] Flashing Atlantis DeepSea to COM3 ...
+    Please wait ~30 seconds.
+
+esptool.py v4.x
 Connecting........
 Chip is ESP32-D0WDQ6 (revision v1.0)
-Uploading stub...
-Writing at 0x00010000... (12 %)
-Writing at 0x00014000... (25 %)
-Writing at 0x00018000... (37 %)
-...
+Writing at 0x00010000... (25 %)
+Writing at 0x00040000... (50 %)
+Writing at 0x00070000... (75 %)
 Writing at 0x000d0000... (100 %)
 Hash of data verified.
 Hard resetting via RTS pin...
 
-[✓] Flash complete!
+  +--------------------------------------------+
+  |  Flash complete!                             |
+  |  Unplug and replug your T-Display.           |
+  |  The Atlantis DeepSea setup screen starts.   |
+  +--------------------------------------------+
 ```
-
-> **First build takes 2–4 minutes** — PlatformIO downloads the ESP32 toolchain and TFT_eSPI library automatically. Subsequent flashes are ~30 seconds.
 
 ---
 
@@ -156,19 +137,20 @@ Hard resetting via RTS pin...
 
 | Problem | Fix |
 |---|---|
-| `Port not found` | Check Device Manager (Windows) or `ls /dev/cu.*` (macOS) |
+| Device not detected | Install CP210x driver, restart Windows, try again |
+| `Failed to connect to ESP32` | Hold the **BOOT** button while the flasher connects |
+| Nothing happens on double-click | Right-click → **Run as administrator** |
+| SmartScreen blocks the .exe | Click **More info** → **Run anyway** |
+| Wrong COM port | Open **Device Manager → Ports** and check the number |
+| Charge-only cable | Use a different USB-C cable — must support data transfer |
 | `Permission denied` on macOS | Run `sudo ./flash.sh` |
-| `pip not found` on Windows | Reinstall Python and check **Add to PATH** |
-| `Failed to connect to ESP32` | Hold the **BOOT** button on the board while the script says `Connecting...` |
-| Board not detected at all | Try a different USB-C cable — some cables are charge-only with no data lines |
-| Driver not showing in Device Manager | Try a different USB port on your PC, then reinstall the CP210x driver |
-| `invalid header` or garbled output | Wrong baud rate — monitor at **115200** baud |
+| Port busy / access denied | Close Arduino IDE, PuTTY, or any serial monitor |
 
 ---
 
 ## First boot walkthrough
 
-After a successful flash, the T-Display restarts automatically:
+After flashing, the T-Display restarts automatically:
 
 ```
 1.  Atlantis DeepSea boot animation
@@ -177,16 +159,15 @@ After a successful flash, the T-Display restarts automatically:
     → BTN1 toggles between 12 and 24 words
     → BTN2 confirms
 
-3.  Word entry  (repeated N times)
+3.  Word entry  (one word at a time)
     → BTN1 cycles letters  a → b → c → ... → z → backspace
-    → BTN2 adds the current letter to your typed prefix
-    → Matching words appear as you type
+    → BTN2 adds the letter — matching words appear as you type
     → When only 1 match remains, BTN2 accepts it automatically
-    → BTN2 long-press switches to scrollable word list
+    → BTN2 long-press → switch to scrollable word list
 
 4.  Verification — re-enter 3 random words to confirm your backup
 
-5.  Set your 6-digit PIN
+5.  Set a 6-digit PIN
     → BTN1 changes the current digit  (0 → 1 → ... → 9 → 0)
     → BTN2 confirms the digit and advances
     → BTN1 long-press goes back one digit
@@ -216,9 +197,9 @@ The device **auto-locks** after 2 minutes of inactivity.
 
 ## Button reference
 
-| Button | Press type | Action (context-dependent) |
+| Button | Press type | Action |
 |---|---|---|
-| BTN1 (top) | Short press | Increment / next option / next letter |
+| BTN1 (top) | Short press | Increment / next letter / scroll |
 | BTN1 (top) | Long press | Back / delete / cancel |
 | BTN2 (bottom) | Short press | Confirm / select / advance |
-| BTN2 (bottom) | Long press | Context action (switch mode, force pick) |
+| BTN2 (bottom) | Long press | Switch mode / force word list |
