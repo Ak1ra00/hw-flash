@@ -137,6 +137,12 @@ jobs:
       with:
         name: windows-exe
 
+    - name: Download firmware artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: firmware-bins
+        path: firmware-bins
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
@@ -145,17 +151,16 @@ jobs:
         body: |
           ## Atlantis DeepSea — BIP85 Password Manager
 
-          ### Windows — Two clicks to flash
+          ### Flash from your browser (Chrome / Edge)
+          👉 **[ak1ra00.github.io/hw-flash](https://ak1ra00.github.io/hw-flash)** — no installs, works on any OS
+
+          ### Windows — Two clicks
           1. Download **`AtlantisDeepSea-Flasher.exe`** below
-          2. Plug in your LilyGO T-Display via USB-C
-          3. Double-click the .exe — it auto-detects the device and flashes
+          2. Plug in your LilyGO T-Display via USB-C and enter bootloader mode (hold BOOT, replug USB, release BOOT)
+          3. Double-click the .exe — auto-detects the device and flashes
 
-          > **Windows SmartScreen warning?**
-          > Click **More info** → **Run anyway**.
-          > This is a known prompt for unsigned open-source tools.
-
-          > **Device not detected?**
-          > Install the [CP210x USB driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers), restart Windows, then run the flasher again.
+          > **Windows SmartScreen warning?** Click **More info** → **Run anyway**.
+          > **Device not detected?** Install the [CP210x USB driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers), restart Windows, then try again.
 
           ---
           ### macOS / Linux — Terminal
@@ -165,6 +170,11 @@ jobs:
           chmod +x flash.sh && ./flash.sh
           ```
           Full guide: [FLASHING.md](https://github.com/ak1ra00/hw-flash/blob/main/atlantis-deepsea/FLASHING.md)
-        files: AtlantisDeepSea-Flasher.exe
+        files: |
+          AtlantisDeepSea-Flasher.exe
+          firmware-bins/bootloader.bin
+          firmware-bins/partitions.bin
+          firmware-bins/boot_app0.bin
+          firmware-bins/firmware.bin
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

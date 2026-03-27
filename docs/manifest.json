@@ -1,0 +1,27 @@
+{
+  "name": "Atlantis DeepSea",
+  "version": "latest",
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "https://github.com/ak1ra00/hw-flash/releases/latest/download/bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "https://github.com/ak1ra00/hw-flash/releases/latest/download/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "https://github.com/ak1ra00/hw-flash/releases/latest/download/boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "https://github.com/ak1ra00/hw-flash/releases/latest/download/firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}
