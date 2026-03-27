@@ -28,7 +28,7 @@ jobs:
 
     - name: Build firmware
       working-directory: atlantis-deepsea
-      run: pio run
+      run: python3 -m platformio run
 
     - name: Collect boot_app0.bin from PlatformIO packages
       run: |
