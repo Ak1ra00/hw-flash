@@ -32,9 +32,20 @@ IF "%PORT%"=="" (
     exit /b 1
 )
 
-echo [*] Flashing to %PORT% ...
+echo [*] Installing / updating dependencies...
 cd /d "%~dp0"
-pio run -t upload --upload-port %PORT%
+python -m platformio pkg install
+
+echo [*] Configuring TFT_eSPI display library...
+IF EXIST ".pio\libdeps\lilygo-t-display\TFT_eSPI" (
+    copy /Y include\User_Setup.h .pio\libdeps\lilygo-t-display\TFT_eSPI\User_Setup.h >nul
+    echo     User_Setup.h applied.
+) ELSE (
+    echo     Warning: TFT_eSPI not found, skipping User_Setup.h copy.
+)
+
+echo [*] Flashing to %PORT% ...
+python -m platformio run -t upload --upload-port %PORT%
 
 IF %ERRORLEVEL% EQU 0 (
     echo.

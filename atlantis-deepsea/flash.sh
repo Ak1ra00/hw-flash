@@ -57,8 +57,21 @@ if [ -z "$PORT" ]; then
     echo "[*] Auto-detected port: $PORT"
 fi
 
-echo "[*] Building and flashing to $PORT ..."
 cd "$(dirname "$0")"
+
+echo "[*] Installing / updating dependencies..."
+$PIO pkg install
+
+echo "[*] Configuring TFT_eSPI display library..."
+TFT_DIR=".pio/libdeps/lilygo-t-display/TFT_eSPI"
+if [ -d "$TFT_DIR" ]; then
+    cp -f include/User_Setup.h "$TFT_DIR/User_Setup.h"
+    echo "    User_Setup.h applied."
+else
+    echo "    Warning: TFT_eSPI not found, skipping User_Setup.h copy."
+fi
+
+echo "[*] Building and flashing to $PORT ..."
 $PIO run -t upload --upload-port "$PORT"
 
 echo ""

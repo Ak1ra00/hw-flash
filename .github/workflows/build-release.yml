@@ -29,9 +29,19 @@ jobs:
         pip install --break-system-packages platformio
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+    - name: Install PlatformIO dependencies
+      working-directory: atlantis-deepsea
+      run: python3 -m platformio pkg install
+
+    - name: Configure TFT_eSPI User_Setup.h
+      working-directory: atlantis-deepsea
+      run: |
+        cp include/User_Setup.h \
+           .pio/libdeps/lilygo-t-display/TFT_eSPI/User_Setup.h
+
     - name: Build firmware
       working-directory: atlantis-deepsea
-      run: platformio run
+      run: python3 -m platformio run
 
     - name: Collect boot_app0.bin from PlatformIO packages
       run: |
