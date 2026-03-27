@@ -4,67 +4,109 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:        # also triggerable manually from GitHub Actions tab
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+
+  # ── 1. Build firmware on Linux (fast + free) ────────────────────────────────
+  build-firmware:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
 
-    - name: Install Python, PlatformIO, esptool
-      run: pip install platformio esptool
+    - uses: actions/checkout@v4
+
+    - name: Install PlatformIO
+      run: pip install platformio
 
     - name: Build firmware
       working-directory: atlantis-deepsea
       run: pio run
 
-    - name: Locate boot_app0.bin
+    - name: Collect boot_app0.bin from PlatformIO packages
       run: |
-        BOOT=$(find ~/.platformio -name "boot_app0.bin" | grep "arduinoespressif32" | head -1)
-        echo "boot_app0=${BOOT}" >> $GITHUB_ENV
-        echo "Found boot_app0 at: ${BOOT}"
+        BOOT=$(find ~/.platformio -name "boot_app0.bin" \
+               | grep "arduinoespressif32" | head -1)
+        echo "boot_app0 path: $BOOT"
+        cp "$BOOT" boot_app0.bin
 
-    - name: Download esptool for Windows (64-bit)
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-bins
+        path: |
+          atlantis-deepsea/.pio/build/lilygo-t-display/bootloader.bin
+          atlantis-deepsea/.pio/build/lilygo-t-display/partitions.bin
+          atlantis-deepsea/.pio/build/lilygo-t-display/firmware.bin
+          boot_app0.bin
+
+
+  # ── 2. Package single .exe on Windows ───────────────────────────────────────
+  package-windows:
+    runs-on: windows-latest
+    needs: build-firmware
+
+    steps:
+
+    - uses: actions/checkout@v4
+
+    - name: Download firmware artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: firmware-bins
+        path: flasher-workspace
+
+    - name: Copy flasher script into workspace
+      shell: bash
       run: |
-        ESPTOOL_URL=$(curl -s https://api.github.com/repos/espressif/esptool/releases/latest \
-          | python3 -c "
-import sys, json
-r = json.load(sys.stdin)
-win = next((a['browser_download_url'] for a in r['assets'] if 'win64' in a['name'] and a['name'].endswith('.zip')), None)
-if not win:
-    win = next((a['browser_download_url'] for a in r['assets'] if 'windows' in a['name'].lower() and a['name'].endswith('.zip')), None)
-print(win)
-")
-        echo "Downloading esptool: $ESPTOOL_URL"
-        curl -L "$ESPTOOL_URL" -o esptool-win.zip
-        unzip esptool-win.zip -d esptool-win
-        find esptool-win -name "esptool.exe" -exec cp {} esptool.exe \;
+        cp atlantis-deepsea/tools/flasher/flasher.py flasher-workspace/
+        # Flatten any subdirectory from artifact download
+        find flasher-workspace -name '*.bin' -exec cp {} flasher-workspace/ \;
+        echo "Workspace contents:"
+        ls -la flasher-workspace/
 
-    - name: Package Windows portable ZIP
+    - name: Install Python dependencies
+      run: pip install pyinstaller esptool pyserial
+
+    - name: Build single-file .exe with PyInstaller
+      working-directory: flasher-workspace
+      shell: bash
       run: |
-        mkdir -p AtlantisDeepSea-Windows
+        pyinstaller \
+          --onefile \
+          --console \
+          --name "AtlantisDeepSea-Flasher" \
+          --add-data "bootloader.bin;." \
+          --add-data "partitions.bin;." \
+          --add-data "boot_app0.bin;." \
+          --add-data "firmware.bin;." \
+          flasher.py
 
-        # Firmware binaries
-        cp atlantis-deepsea/.pio/build/lilygo-t-display/bootloader.bin  AtlantisDeepSea-Windows/
-        cp atlantis-deepsea/.pio/build/lilygo-t-display/partitions.bin  AtlantisDeepSea-Windows/
-        cp "${{ env.boot_app0 }}"                                        AtlantisDeepSea-Windows/boot_app0.bin
-        cp atlantis-deepsea/.pio/build/lilygo-t-display/firmware.bin    AtlantisDeepSea-Windows/
+        echo "Build output:"
+        ls -lh dist/
 
-        # Windows flasher tool
-        cp esptool.exe                                    AtlantisDeepSea-Windows/
-        cp atlantis-deepsea/tools/flasher/flash.bat       AtlantisDeepSea-Windows/
-        cp atlantis-deepsea/tools/flasher/README.txt      AtlantisDeepSea-Windows/
+    - name: Upload .exe artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-exe
+        path: flasher-workspace/dist/AtlantisDeepSea-Flasher.exe
 
-        zip -r AtlantisDeepSea-Windows.zip AtlantisDeepSea-Windows/
 
-        echo "Package contents:"
-        unzip -l AtlantisDeepSea-Windows.zip
+  # ── 3. Publish GitHub Release ────────────────────────────────────────────────
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-firmware, package-windows]
+
+    steps:
+
+    - uses: actions/checkout@v4
+
+    - name: Download Windows .exe
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-exe
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -73,19 +115,26 @@ print(win)
         body: |
           ## Atlantis DeepSea — BIP85 Password Manager
 
-          ### Windows — No install required
-          1. Download **`AtlantisDeepSea-Windows.zip`** below
-          2. Extract the ZIP anywhere
-          3. Plug in your LilyGO T-Display via USB-C
-          4. Double-click **`flash.bat`**
+          ### Windows — Two clicks to flash
+          1. Download **`AtlantisDeepSea-Flasher.exe`** below
+          2. Plug in your LilyGO T-Display via USB-C
+          3. Double-click the .exe — it auto-detects the device and flashes
 
-          > First-time users: install the [CP210x USB driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers) if the device isn't detected.
+          > **Windows SmartScreen warning?**
+          > Click **More info** → **Run anyway**.
+          > This is a known prompt for unsigned open-source tools.
 
-          ### macOS / Linux — From source
-          See [FLASHING.md](https://github.com/ak1ra00/hw-flash/blob/main/atlantis-deepsea/FLASHING.md) for full instructions.
+          > **Device not detected?**
+          > Install the [CP210x USB driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers), restart Windows, then run the flasher again.
 
           ---
-          **Full guide:** [FLASHING.md](https://github.com/ak1ra00/hw-flash/blob/main/atlantis-deepsea/FLASHING.md)
-        files: AtlantisDeepSea-Windows.zip
+          ### macOS / Linux — Terminal
+          ```bash
+          git clone https://github.com/ak1ra00/hw-flash
+          cd hw-flash/atlantis-deepsea
+          chmod +x flash.sh && ./flash.sh
+          ```
+          Full guide: [FLASHING.md](https://github.com/ak1ra00/hw-flash/blob/main/atlantis-deepsea/FLASHING.md)
+        files: AtlantisDeepSea-Flasher.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
