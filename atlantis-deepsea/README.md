@@ -41,24 +41,20 @@ Derive unlimited, deterministic passwords from a single BIP39 seed phrase — fu
 >
 > Covers macOS and Windows, USB driver install, port detection, and troubleshooting.
 
-**Quick start:**
+**Windows (easiest):**
+
+1. Download **[AtlantisDeepSea-Flasher.exe](https://github.com/ak1ra00/hw-flash/releases/latest)** — no installs needed
+2. Plug in your T-Display via USB-C
+3. Double-click the `.exe` — flashes automatically in ~30 seconds
+
+**macOS / Linux:**
 
 ```bash
-# macOS / Linux
 git clone https://github.com/ak1ra00/hw-flash
 cd hw-flash/atlantis-deepsea
 chmod +x flash.sh
 ./flash.sh
 ```
-
-```bat
-REM Windows
-git clone https://github.com/ak1ra00/hw-flash
-cd hw-flash\atlantis-deepsea
-flash.bat COM3
-```
-
-PlatformIO is installed automatically if missing.
 
 ---
 
