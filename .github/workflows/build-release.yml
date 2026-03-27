@@ -114,7 +114,7 @@ jobs:
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           echo "value=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
         elif [ "${{ github.event_name }}" = "push" ] && [ -f VERSION ]; then
-          echo "value=$(cat VERSION)" >> $GITHUB_OUTPUT
+          echo "value=$(head -1 VERSION | tr -d '[:space:]')" >> $GITHUB_OUTPUT
         else
           echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
         fi
