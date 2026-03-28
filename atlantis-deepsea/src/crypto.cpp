@@ -241,7 +241,7 @@ size_t aes256_encrypt(const uint8_t key[32], const uint8_t iv[16],
                       const uint8_t* plain, size_t plain_len,
                       uint8_t* cipher_out) {
     // PKCS7 padding
-    size_t padded = ((plain_len + 15) / 16) * 16;
+    size_t padded = ((plain_len / 16) + 1) * 16;  // always add a padding block (PKCS7)
     uint8_t pad_byte = (uint8_t)(padded - plain_len);
     uint8_t buf[padded];
     memcpy(buf, plain, plain_len);
