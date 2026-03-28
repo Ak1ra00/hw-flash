@@ -170,8 +170,13 @@ void setup() {
     Serial.begin(115200);
 
     ui_init();
-    storage_init();
-    bleKeyboard.begin();   // starts BLE advertising in background
+
+    // Initialise BLE FIRST so its internal NVS calls complete before we open
+    // the "atlantis" namespace.  Reversed order was causing the BLE stack to
+    // reinitialise NVS after our handle was opened, invalidating it silently.
+    bleKeyboard.begin();
+
+    storage_init();   // opens NVS after BLE stack is stable
 
     state = STATE_BOOT;
 }
@@ -220,26 +225,23 @@ void loop() {
     case STATE_GET_PASSWORD: {
         touch_activity();
         uint32_t idx = 0;
-        uint8_t  len = PWD_LEN_DEFAULT;
 
-        if (!ui_password_config(&idx, &len)) {
-            // User cancelled
+        if (!ui_password_config(&idx)) {
             state = STATE_MAIN_MENU;
             break;
         }
 
         touch_activity();
 
-        // Derive BIP85 password
         ui_message("Deriving...", "Computing password...", 1200);
 
         char pwd[87] = {0};
-        bool ok = bip85_password(master_key, master_chain, len, idx, pwd);
+        bool ok = bip85_password(master_key, master_chain, PWD_LEN_FIXED, idx, pwd);
 
         if (!ok) {
             ui_message("Error", "Derivation failed.\nTry a different index.", 2500);
         } else {
-            bool wants_type = ui_show_password(pwd, idx, len, bleKeyboard.isConnected());
+            bool wants_type = ui_show_password(pwd, idx, PWD_LEN_FIXED, bleKeyboard.isConnected());
 
             if (wants_type) {
                 if (bleKeyboard.isConnected()) {

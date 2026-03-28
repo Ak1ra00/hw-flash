@@ -13,18 +13,14 @@
 #define KEY_PHASH   "phash"     // blob 32 — PIN key hash (verify without decrypt)
 #define KEY_CSALT   "csalt"     // blob 16 — cipher key derivation salt
 #define KEY_CIV     "civ"       // blob 16 — AES-CBC IV
-#define KEY_CDATA   "cdata"     // blob 80 — encrypted (master_key || master_chain) = 64B → 80B padded
+#define KEY_CDATA   "cdata"     // blob 80 — encrypted (master_key || master_chain)
 #define KEY_FAILS   "fails"     // uint8  — consecutive wrong PIN count
-#define KEY_LOCKTS  "lockts"    // uint32 — lockout start timestamp (ms)
+#define KEY_LOCKTS  "lockts"    // uint32 — lockout start timestamp (ms, 0 = none)
 
-static nvs_handle_t g_nvs;
-static bool g_open = false;
-
-static void open_nvs() {
-    if (!g_open) {
-        nvs_open(NVS_NAMESPACE, NVS_READWRITE, &g_nvs);
-        g_open = true;
-    }
+// Always open a fresh handle — never cache; BLE stack may reinitialise NVS
+// between calls, so a stale handle would silently return ESP_ERR_NVS_INVALID_HANDLE.
+static bool nvs_open_rw(nvs_handle_t* h) {
+    return nvs_open(NVS_NAMESPACE, NVS_READWRITE, h) == ESP_OK;
 }
 
 void storage_init() {
@@ -33,20 +29,29 @@ void storage_init() {
         nvs_flash_erase();
         nvs_flash_init();
     }
-    open_nvs();
+
+    // millis() resets on every boot — any lockout timestamp from a previous
+    // session is meaningless.  Reset it so storage_is_locked_out() can start
+    // a fresh in-session timer if needed.
+    nvs_handle_t h;
+    if (nvs_open_rw(&h)) {
+        nvs_set_u32(h, KEY_LOCKTS, 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
 }
 
 bool storage_is_setup() {
-    open_nvs();
+    nvs_handle_t h;
+    if (!nvs_open_rw(&h)) return false;
     uint8_t v = 0;
-    nvs_get_u8(g_nvs, KEY_SETUP, &v);
+    nvs_get_u8(h, KEY_SETUP, &v);
+    nvs_close(h);
     return v == 0x01;
 }
 
 bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
                   const char pin[7], uint8_t word_count) {
-    open_nvs();
-
     // Random salts + IV
     uint8_t psalt[16], csalt[16], civ[16];
     crypto_rand(psalt, 16);
@@ -71,52 +76,90 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
 
     if (clen == 0) return false;
 
-    nvs_set_u8(g_nvs,    KEY_SETUP, 0x01);
-    nvs_set_u8(g_nvs,    KEY_WC,    word_count);
-    nvs_set_u8(g_nvs,    KEY_FAILS, 0);
-    nvs_set_blob(g_nvs,  KEY_PSALT, psalt, 16);
-    nvs_set_blob(g_nvs,  KEY_PHASH, phash, 32);
-    nvs_set_blob(g_nvs,  KEY_CSALT, csalt, 16);
-    nvs_set_blob(g_nvs,  KEY_CIV,   civ,   16);
-    nvs_set_blob(g_nvs,  KEY_CDATA, cipher, clen);
-    nvs_commit(g_nvs);
+    nvs_handle_t h;
+    if (!nvs_open_rw(&h)) return false;
 
-    memset(phash, 0, 32); memset(civ, 0, 16);
+    nvs_set_u8  (h, KEY_SETUP, 0x01);
+    nvs_set_u8  (h, KEY_WC,    word_count);
+    nvs_set_u8  (h, KEY_FAILS, 0);
+    nvs_set_u32 (h, KEY_LOCKTS, 0);
+    nvs_set_blob(h, KEY_PSALT, psalt, 16);
+    nvs_set_blob(h, KEY_PHASH, phash, 32);
+    nvs_set_blob(h, KEY_CSALT, csalt, 16);
+    nvs_set_blob(h, KEY_CIV,   civ,   16);
+    nvs_set_blob(h, KEY_CDATA, cipher, clen);
+    nvs_commit(h);
+    nvs_close(h);
+
+    memset(phash, 0, 32);
+    memset(civ,   0, 16);
     return true;
 }
 
 bool storage_is_locked_out() {
-    open_nvs();
+    nvs_handle_t h;
+    if (!nvs_open_rw(&h)) return false;
+
     uint8_t fails = 0;
-    nvs_get_u8(g_nvs, KEY_FAILS, &fails);
-    if (fails < PIN_MAX_ATTEMPTS) return false;
+    nvs_get_u8(h, KEY_FAILS, &fails);
+
+    if (fails < PIN_MAX_ATTEMPTS) {
+        nvs_close(h);
+        return false;
+    }
 
     uint32_t ts = 0;
-    nvs_get_u32(g_nvs, KEY_LOCKTS, &ts);
-    uint32_t now = (uint32_t)(millis() & 0xFFFFFFFF);
-    return (now - ts) < PIN_LOCKOUT_MS;
+    nvs_get_u32(h, KEY_LOCKTS, &ts);
+
+    if (ts == 0) {
+        // Max fails reached but no in-session timestamp yet (e.g. first check
+        // after reboot).  Start a fresh lockout timer now.
+        ts = millis();
+        nvs_set_u32(h, KEY_LOCKTS, ts);
+        nvs_commit(h);
+    }
+    nvs_close(h);
+
+    return (millis() - ts) < PIN_LOCKOUT_MS;
 }
 
 int storage_attempts_left() {
-    open_nvs();
+    nvs_handle_t h;
+    if (!nvs_open_rw(&h)) return PIN_MAX_ATTEMPTS;
     uint8_t fails = 0;
-    nvs_get_u8(g_nvs, KEY_FAILS, &fails);
+    nvs_get_u8(h, KEY_FAILS, &fails);
+    nvs_close(h);
     int left = PIN_MAX_ATTEMPTS - (int)fails;
     return left < 0 ? 0 : left;
 }
 
 bool storage_load(const char pin[7],
                   uint8_t master_key[32], uint8_t master_chain[32]) {
-    open_nvs();
-
     if (storage_is_locked_out()) return false;
 
-    // Verify PIN hash first (cheap check)
+    nvs_handle_t h;
+    if (!nvs_open_rw(&h)) return false;
+
+    // Verify PIN hash
     uint8_t psalt[16], phash_stored[32], phash_calc[32];
     size_t sz = 16;
-    if (nvs_get_blob(g_nvs, KEY_PSALT, psalt, &sz) != ESP_OK) return false;
+    bool read_ok = (nvs_get_blob(h, KEY_PSALT, psalt, &sz) == ESP_OK);
     sz = 32;
-    if (nvs_get_blob(g_nvs, KEY_PHASH, phash_stored, &sz) != ESP_OK) return false;
+    read_ok = read_ok && (nvs_get_blob(h, KEY_PHASH, phash_stored, &sz) == ESP_OK);
+
+    if (!read_ok) {
+        // NVS unreadable — treat as wrong PIN and count the attempt
+        uint8_t fails = 0;
+        nvs_get_u8(h, KEY_FAILS, &fails);
+        fails++;
+        nvs_set_u8(h, KEY_FAILS, fails);
+        if (fails >= PIN_MAX_ATTEMPTS) {
+            nvs_set_u32(h, KEY_LOCKTS, millis());
+        }
+        nvs_commit(h);
+        nvs_close(h);
+        return false;
+    }
 
     pin_to_key(pin, psalt, phash_calc);
     bool pin_ok = (memcmp(phash_calc, phash_stored, 32) == 0);
@@ -124,26 +167,27 @@ bool storage_load(const char pin[7],
 
     if (!pin_ok) {
         uint8_t fails = 0;
-        nvs_get_u8(g_nvs, KEY_FAILS, &fails);
+        nvs_get_u8(h, KEY_FAILS, &fails);
         fails++;
-        nvs_set_u8(g_nvs, KEY_FAILS, fails);
+        nvs_set_u8(h, KEY_FAILS, fails);
         if (fails >= PIN_MAX_ATTEMPTS) {
-            uint32_t now = (uint32_t)(millis() & 0xFFFFFFFF);
-            nvs_set_u32(g_nvs, KEY_LOCKTS, now);
+            nvs_set_u32(h, KEY_LOCKTS, millis());
         }
-        nvs_commit(g_nvs);
+        nvs_commit(h);
+        nvs_close(h);
         return false;
     }
 
-    // Reset fail counter on success
-    nvs_set_u8(g_nvs, KEY_FAILS, 0);
-    nvs_commit(g_nvs);
+    // PIN correct — reset fail counter
+    nvs_set_u8(h, KEY_FAILS, 0);
+    nvs_commit(h);
 
     // Decrypt master key
     uint8_t csalt[16], civ[16], cipher[80], plain[80];
-    sz = 16; nvs_get_blob(g_nvs, KEY_CSALT, csalt, &sz);
-    sz = 16; nvs_get_blob(g_nvs, KEY_CIV,   civ,   &sz);
-    sz = 80; nvs_get_blob(g_nvs, KEY_CDATA, cipher, &sz);
+    sz = 16; nvs_get_blob(h, KEY_CSALT, csalt,  &sz);
+    sz = 16; nvs_get_blob(h, KEY_CIV,   civ,    &sz);
+    sz = 80; nvs_get_blob(h, KEY_CDATA, cipher, &sz);
+    nvs_close(h);
 
     uint8_t ckey[32];
     pin_to_key(pin, csalt, ckey);
@@ -162,14 +206,18 @@ bool storage_load(const char pin[7],
 }
 
 uint8_t storage_word_count() {
-    open_nvs();
+    nvs_handle_t h;
+    if (!nvs_open_rw(&h)) return 12;
     uint8_t wc = 12;
-    nvs_get_u8(g_nvs, KEY_WC, &wc);
+    nvs_get_u8(h, KEY_WC, &wc);
+    nvs_close(h);
     return wc;
 }
 
 void storage_wipe() {
-    open_nvs();
-    nvs_erase_all(g_nvs);
-    nvs_commit(g_nvs);
+    nvs_handle_t h;
+    if (!nvs_open_rw(&h)) return;
+    nvs_erase_all(h);
+    nvs_commit(h);
+    nvs_close(h);
 }

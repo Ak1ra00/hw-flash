@@ -20,9 +20,9 @@
 #define AUTO_LOCK_MS    120000UL   // 2 min idle → lock
 
 // ── Password derivation ───────────────────────────────────────────────────────
-#define PWD_LEN_MIN      10
+#define PWD_LEN_FIXED    20        // Fixed output length — index is the only user input
+#define PWD_LEN_MIN      10        // kept for BIP85 API compatibility
 #define PWD_LEN_MAX      85
-#define PWD_LEN_DEFAULT  20
 #define PWD_IDX_MAX    9999
 #define PWD_SHOW_MS    30000UL   // auto-clear after 30 s
 

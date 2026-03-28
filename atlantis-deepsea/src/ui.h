@@ -56,9 +56,9 @@ enum MenuItem {
 MenuItem ui_main_menu();
 
 // ── Password config ───────────────────────────────────────────────────────────
-// Interactive: user picks index (0-9999) and length (10-85).
-// Returns false if user cancels (long BTN1 on first field).
-bool ui_password_config(uint32_t* index_out, uint8_t* len_out);
+// User picks index (0-9999).  Length is always PWD_LEN_FIXED.
+// Returns false if user cancels (BTN1 long-press).
+bool ui_password_config(uint32_t* index_out);
 
 // ── Password display ──────────────────────────────────────────────────────────
 // Show password string; auto-clears after PWD_SHOW_MS or button press.

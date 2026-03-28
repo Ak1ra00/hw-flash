@@ -254,7 +254,7 @@ bool ui_pin_entry(char pin_out[7], bool wrong, int attempts_left, bool locked_ou
             }
         }
 
-        draw_footer("BTN1: change digit", "BTN2: confirm");
+        draw_footer("1:up  2:down", "BOTH: confirm digit");
     };
 
     draw_pin_screen();
@@ -276,15 +276,22 @@ bool ui_pin_entry(char pin_out[7], bool wrong, int attempts_left, bool locked_ou
             continue;
         }
 
+        // BTN1 short → digit up
         if (btn1_short()) {
             digits[pos] = (digits[pos] + 1) % 10;
             draw_pin_screen();
         }
 
+        // BTN2 short → digit down
         if (btn2_short()) {
+            digits[pos] = (digits[pos] + 9) % 10;   // +9 mod 10 = -1
+            draw_pin_screen();
+        }
+
+        // BOTH → confirm digit, advance position
+        if (btns_both()) {
             pos++;
             if (pos >= N) {
-                // All 6 digits entered
                 for (int i = 0; i < N; i++) pin_out[i] = '0' + digits[i];
                 pin_out[N] = '\0';
                 done = true;
@@ -293,8 +300,8 @@ bool ui_pin_entry(char pin_out[7], bool wrong, int attempts_left, bool locked_ou
             }
         }
 
+        // BTN1 long → back one digit
         if (btn1_long() && pos > 0) {
-            // Back one digit
             pos--;
             digits[pos] = 0;
             draw_pin_screen();
@@ -331,14 +338,14 @@ int ui_choose_word_count() {
             }
             tft.drawString(opts[i], 26, oy, 1);
         }
-        draw_footer("BTN1: toggle", "BTN2: confirm");
+        draw_footer("1/2: toggle", "BOTH: confirm");
     };
 
     draw();
     while (true) {
         btns_poll();
-        if (btn1_short()) { choice = 1 - choice; draw(); }
-        if (btn2_short())  return (choice == 0) ? 12 : 24;
+        if (btn1_short() || btn2_short()) { choice = 1 - choice; draw(); }
+        if (btns_both()) return (choice == 0) ? 12 : 24;
         delay(8);
     }
 }
@@ -584,72 +591,43 @@ MenuItem ui_main_menu() {
             }
         }
 
-        draw_footer("BTN1: scroll", "BTN2: select");
+        draw_footer("1:down  2:up", "BOTH: select");
     };
 
     draw();
     while (true) {
         btns_poll();
         if (btn1_short()) { sel = (sel + 1) % MENU_COUNT; draw(); }
-        if (btn2_short())  return (MenuItem)sel;
+        if (btn2_short()) { sel = (sel - 1 + MENU_COUNT) % MENU_COUNT; draw(); }
+        if (btns_both())   return (MenuItem)sel;
         delay(8);
     }
 }
 
 // ── Password config ───────────────────────────────────────────────────────────
-bool ui_password_config(uint32_t* index_out, uint8_t* len_out) {
+bool ui_password_config(uint32_t* index_out) {
     uint32_t idx = 0;
-    uint8_t  len = PWD_LEN_DEFAULT;
-    int field = 0;  // 0 = index, 1 = length
 
     auto draw = [&]() {
         tft.fillScreen(C_BG);
         draw_header("Get Password");
 
-        tft.setTextDatum(ML_DATUM);
-
-        // Index field
-        {
-            bool active = (field == 0);
-            uint16_t lc = active ? C_SEL    : C_DIM;
-            uint16_t bc = active ? tft.color565(0,40,60) : C_BOX;
-            uint16_t ec = active ? C_PIN    : C_TEXT;
-            tft.setTextColor(lc, C_BG);
-            tft.drawString("Index  (0-9999):", 12, 44, 1);
-            tft.fillRoundRect(130, 34, 90, 18, 3, bc);
-            tft.drawRoundRect(130, 34, 90, 18, 3, active ? C_PIN : C_BORDER);
-            char buf[8]; snprintf(buf, sizeof(buf), "%4lu", idx);
-            tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(ec, bc);
-            tft.drawString(buf, 175, 43, 2);
-        }
-
-        // Length field
-        {
-            bool active = (field == 1);
-            uint16_t lc = active ? C_SEL    : C_DIM;
-            uint16_t bc = active ? tft.color565(0,40,60) : C_BOX;
-            uint16_t ec = active ? C_PIN    : C_TEXT;
-            tft.setTextDatum(ML_DATUM);
-            tft.setTextColor(lc, C_BG);
-            tft.drawString("Length (10-85):", 12, 74, 1);
-            tft.fillRoundRect(130, 64, 90, 18, 3, bc);
-            tft.drawRoundRect(130, 64, 90, 18, 3, active ? C_PIN : C_BORDER);
-            char buf[6]; snprintf(buf, sizeof(buf), "%3d", len);
-            tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(ec, bc);
-            tft.drawString(buf, 175, 73, 2);
-        }
-
-        // Action hint
         tft.setTextDatum(MC_DATUM);
         tft.setTextColor(C_DIM, C_BG);
-        if (field == 0)
-            tft.drawString("BTN2 confirm -> length", DISP_W/2, 100, 1);
-        else
-            tft.drawString("BTN2 confirm -> generate", DISP_W/2, 100, 1);
+        tft.drawString("Password Index  (0-9999)", DISP_W/2, 46, 1);
 
-        draw_footer("BTN1: +1  (hold: +10)", "BTN2: next/confirm");
+        // Big index box
+        tft.fillRoundRect(40, 56, DISP_W - 80, 32, 5, tft.color565(0, 40, 60));
+        tft.drawRoundRect(40, 56, DISP_W - 80, 32, 5, C_PIN);
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%lu", idx);
+        tft.setTextColor(C_PIN, tft.color565(0, 40, 60));
+        tft.drawString(buf, DISP_W/2, 72, 4);
+
+        tft.setTextColor(C_DIM, C_BG);
+        tft.drawString("hold 1:+10  hold 2:cancel", DISP_W/2, 103, 1);
+
+        draw_footer("1:+1  2:-1", "BOTH: generate");
     };
 
     draw();
@@ -657,27 +635,15 @@ bool ui_password_config(uint32_t* index_out, uint8_t* len_out) {
     while (true) {
         btns_poll();
 
-        if (btn1_long() && field == 0) return false;  // cancel
+        if (btn1_short()) { idx = (idx + 1)              % (PWD_IDX_MAX + 1); draw(); }
+        if (btn2_short()) { idx = (idx + PWD_IDX_MAX)    % (PWD_IDX_MAX + 1); draw(); }  // -1
 
-        if (btn1_short()) {
-            if (field == 0) { idx = (idx + 1) % (PWD_IDX_MAX + 1); }
-            else            { len = (len < PWD_LEN_MAX) ? len + 1 : PWD_LEN_MIN; }
-            draw();
-        }
+        if (btn1_long())  { idx = (idx + 10)              % (PWD_IDX_MAX + 1); draw(); }
+        if (btn2_long())  { return false; }   // cancel — go back to menu
 
-        if (btn1_long()) {
-            if (field == 0) { idx = (idx + 10) % (PWD_IDX_MAX + 1); }
-            else            { len = (len + 10 <= PWD_LEN_MAX) ? len + 10 : PWD_LEN_MAX; }
-            draw();
-        }
-
-        if (btn2_short()) {
-            if (field == 0) { field = 1; draw(); }
-            else {
-                *index_out = idx;
-                *len_out   = len;
-                return true;
-            }
+        if (btns_both()) {
+            *index_out = idx;
+            return true;
         }
 
         delay(8);
@@ -822,10 +788,10 @@ void ui_message(const char* title, const char* body, uint32_t ms) {
     if (ms > 0) {
         delay(ms);
     } else {
-        draw_footer("", "BTN2: OK");
+        draw_footer("", "BOTH / BTN2: OK");
         while (true) {
             btns_poll();
-            if (btn2_short()) break;
+            if (btn2_short() || btns_both()) break;
             delay(8);
         }
     }
@@ -841,8 +807,8 @@ void ui_seed_invalid() {
     tft.setTextColor(C_DIM, C_BG);
     tft.drawString("Checksum mismatch.", DISP_W/2, 72, 1);
     tft.drawString("Please try again.", DISP_W/2, 84, 1);
-    draw_footer("", "BTN2: retry");
-    while (true) { btns_poll(); if (btn2_short()) break; delay(8); }
+    draw_footer("", "BOTH / BTN2: retry");
+    while (true) { btns_poll(); if (btn2_short() || btns_both()) break; delay(8); }
 }
 
 // ── About ─────────────────────────────────────────────────────────────────────
@@ -868,8 +834,8 @@ void ui_about() {
         y += 11;
     }
 
-    draw_footer("", "BTN2: back");
-    while (true) { btns_poll(); if (btn2_short()) break; delay(8); }
+    draw_footer("", "BOTH / BTN2: back");
+    while (true) { btns_poll(); if (btn2_short() || btns_both()) break; delay(8); }
 }
 
 // ── Wipe confirm ──────────────────────────────────────────────────────────────
