@@ -71,3 +71,8 @@ void ui_about();
 
 // ── Checksum error ────────────────────────────────────────────────────────────
 void ui_seed_invalid();
+
+// ── BLE passkey display ────────────────────────────────────────────────────────
+// Show a 6-digit BLE pairing passkey.  Blocks until pairing completes or
+// times out (~2 min).  Caller must clear ble_passkey_pending() first.
+void ui_show_passkey(uint32_t code);

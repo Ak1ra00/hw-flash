@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "config.h"
+#include "ble.h"
 #include "ui.h"
 #include "crypto.h"
 #include "storage.h"
@@ -162,6 +163,7 @@ static void run_settings() {
 void setup() {
     Serial.begin(115200);
     ui_init();
+    ble_init();       // BLE must init first — it calls nvs_flash_init internally
     storage_init();
     state = STATE_BOOT;
 }

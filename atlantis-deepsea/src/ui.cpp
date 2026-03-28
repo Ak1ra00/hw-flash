@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "ble.h"
 #include "config.h"
 #include "crypto.h"
 #include "wordlist.h"
@@ -566,14 +567,15 @@ MenuItem ui_main_menu() {
     auto draw = [&]() {
         tft.fillScreen(C_BG);
 
-        // Title bar
+        // Title bar with BLE connection status
         tft.fillRect(0, 0, DISP_W, 20, C_BOX);
         tft.setTextDatum(ML_DATUM);
         tft.setTextColor(C_TITLE, C_BOX);
         tft.drawString("ATLANTIS  DEEPSEA", 8, 10, 1);
         tft.setTextDatum(MR_DATUM);
-        tft.setTextColor(C_DIM, C_BOX);
-        tft.drawString("LOCKED", DISP_W - 8, 10, 1);
+        bool conn = ble_connected();
+        tft.setTextColor(conn ? C_GOOD : C_DIM, C_BOX);
+        tft.drawString(conn ? "BLE" : "no BLE", DISP_W - 8, 10, 1);
         draw_divider(20);
 
         for (int i = 0; i < MENU_COUNT; i++) {
@@ -597,6 +599,15 @@ MenuItem ui_main_menu() {
     draw();
     while (true) {
         btns_poll();
+
+        // Handle BLE passkey pairing request
+        uint32_t pk = ble_passkey_pending();
+        if (pk) {
+            ble_passkey_clear();
+            ui_show_passkey(pk);
+            draw();
+        }
+
         if (btn1_short()) { sel = (sel + 1) % MENU_COUNT; draw(); }
         if (btn2_short()) { sel = (sel - 1 + MENU_COUNT) % MENU_COUNT; draw(); }
         if (btns_both())   return (MenuItem)sel;
@@ -650,59 +661,126 @@ bool ui_password_config(uint32_t* index_out) {
     }
 }
 
-// ── Password display ──────────────────────────────────────────────────────────
-void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
+// ── BLE passkey display ───────────────────────────────────────────────────────
+void ui_show_passkey(uint32_t code) {
     tft.fillScreen(C_BG);
-    draw_header("Password");
+    draw_header("BLE Pairing");
 
-    char meta[32];
-    snprintf(meta, sizeof(meta), "index: %lu", index);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(C_DIM, C_BG);
-    tft.drawString(meta, DISP_W/2, 33, 1);
-    draw_divider(40);
+    tft.drawString("Enter this code on", DISP_W/2, 38, 1);
+    tft.drawString("your computer:", DISP_W/2, 50, 1);
 
-    tft.setTextColor(C_ACCENT, C_BG);
-    if (len <= 22) {
-        tft.drawString(pwd, DISP_W/2, 72, 2);
-    } else {
-        int half = len / 2;
-        char line1[44], line2[44];
-        strncpy(line1, pwd,        half); line1[half] = '\0';
-        strncpy(line2, pwd + half, len - half); line2[len - half] = '\0';
-        tft.drawString(line1, DISP_W/2, 60, 1);
-        tft.drawString(line2, DISP_W/2, 74, 1);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%06lu", (unsigned long)code);
+    tft.setTextColor(C_PIN, C_BG);
+    tft.drawString(buf, DISP_W/2, 85, 4);
+
+    draw_footer("", "waiting for pair...");
+
+    // Wait up to 2 minutes for the pairing to complete or fail
+    uint32_t start = millis();
+    while (millis() - start < 120000UL) {
+        delay(200);
+        if (ble_pair_done_pending()) {
+            bool ok = ble_pair_done_success();
+            ble_pair_done_clear();
+
+            tft.fillScreen(C_BG);
+            tft.setTextDatum(MC_DATUM);
+            if (ok) {
+                tft.setTextColor(C_GOOD, C_BG);
+                tft.drawString("Paired!", DISP_W/2, DISP_H/2, 4);
+            } else {
+                tft.setTextColor(C_WARN, C_BG);
+                tft.drawString("Pairing failed", DISP_W/2, DISP_H/2, 2);
+            }
+            delay(1200);
+            return;
+        }
     }
+    // Timeout — just return; passkey screen closes silently
+}
 
-    draw_footer("", "any button: clear");
+// ── Password display ──────────────────────────────────────────────────────────
+void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
+    auto redraw_screen = [&]() {
+        tft.fillScreen(C_BG);
+        draw_header("Password");
 
-    uint32_t start   = millis();
-    uint32_t timeout = PWD_SHOW_MS;
+        char meta[32];
+        snprintf(meta, sizeof(meta), "index: %lu", (unsigned long)index);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextColor(C_DIM, C_BG);
+        tft.drawString(meta, DISP_W/2, 33, 1);
+        draw_divider(40);
+
+        tft.setTextColor(C_ACCENT, C_BG);
+        if (len <= 22) {
+            tft.drawString(pwd, DISP_W/2, 72, 2);
+        } else {
+            int half = len / 2;
+            char line1[44], line2[44];
+            strncpy(line1, pwd,        half); line1[half] = '\0';
+            strncpy(line2, pwd + half, len - half); line2[len - half] = '\0';
+            tft.drawString(line1, DISP_W/2, 60, 1);
+            tft.drawString(line2, DISP_W/2, 74, 1);
+        }
+    };
+
+    auto redraw_footer = [&]() {
+        if (ble_connected())
+            draw_footer("any btn: clear", "BOTH: type BLE");
+        else
+            draw_footer("", "any button: clear");
+    };
+
+    redraw_screen();
+    redraw_footer();
+
+    bool prev_conn = ble_connected();
 
     while (true) {
         btns_poll();
-        if (btn1_short() || btn2_short() || btn1_long() || btn2_long() || btns_both()) break;
 
-        uint32_t elapsed = millis() - start;
-        if (elapsed >= timeout) break;
+        // Show passkey popup if a BLE pairing request arrives
+        uint32_t pk = ble_passkey_pending();
+        if (pk) {
+            ble_passkey_clear();
+            ui_show_passkey(pk);
+            redraw_screen();
+            redraw_footer();
+            prev_conn = ble_connected();
+        }
 
-        uint32_t remain_s = (timeout - elapsed) / 1000 + 1;
+        // Update footer when connection state changes
+        bool curr_conn = ble_connected();
+        if (curr_conn != prev_conn) {
+            redraw_footer();
+            prev_conn = curr_conn;
+        }
 
-        int bar_w  = DISP_W - 20;
-        int filled = (int)(bar_w * (timeout - elapsed) / timeout);
-        tft.fillRect(10, 98, bar_w, 6, C_BOX);
-        tft.fillRect(10, 98, filled, 6,
-                     tft.color565(0, (uint8_t)(150 * filled / bar_w),
-                                     (uint8_t)(200 * filled / bar_w)));
+        if (btns_both()) {
+            if (ble_connected()) {
+                // Type the password via BLE keyboard
+                ble_type(pwd);
+                // Show brief overlay
+                tft.fillRoundRect(20, 88, DISP_W - 40, 22, 4, tft.color565(0, 50, 0));
+                tft.setTextDatum(MC_DATUM);
+                tft.setTextColor(C_GOOD, tft.color565(0, 50, 0));
+                tft.drawString("Sent via BLE!", DISP_W/2, 99, 1);
+                delay(1200);
+                redraw_screen();
+                redraw_footer();
+                prev_conn = ble_connected();
+            } else {
+                break; // not connected — treat BOTH as clear
+            }
+        }
 
-        char cd[16];
-        snprintf(cd, sizeof(cd), "Clears in %lus", remain_s);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextColor(C_DIM, C_BG);
-        tft.fillRect(0, 108, DISP_W, 12, C_BG);
-        tft.drawString(cd, DISP_W/2, 114, 1);
+        if (btn1_short() || btn2_short() || btn1_long() || btn2_long()) break;
 
-        delay(250);
+        delay(10);
     }
 
     tft.fillScreen(C_BG);
