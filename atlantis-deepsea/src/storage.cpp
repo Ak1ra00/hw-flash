@@ -16,6 +16,7 @@
 #define KEY_CDATA   "cdata"     // blob 80 — encrypted (master_key || master_chain)
 #define KEY_FAILS   "fails"     // uint8  — consecutive wrong PIN count
 #define KEY_LOCKTS  "lockts"    // uint32 — lockout start timestamp (ms, 0 = none)
+#define KEY_PINLEN  "pinlen"    // uint8  — PIN_LENGTH when storage was written
 
 // Always open a fresh handle — never cache; BLE stack may reinitialise NVS
 // between calls, so a stale handle would silently return ESP_ERR_NVS_INVALID_HANDLE.
@@ -30,15 +31,31 @@ void storage_init() {
         nvs_flash_init();
     }
 
-    // millis() resets on every boot — any lockout timestamp from a previous
-    // session is meaningless.  Reset it so storage_is_locked_out() can start
-    // a fresh in-session timer if needed.
     nvs_handle_t h;
-    if (nvs_open_rw(&h)) {
-        nvs_set_u32(h, KEY_LOCKTS, 0);
-        nvs_commit(h);
-        nvs_close(h);
+    if (!nvs_open_rw(&h)) return;
+
+    // ── Format-version guard ─────────────────────────────────────────────────
+    // If the device was set up with a different PIN_LENGTH (e.g. old 6-digit
+    // PIN firmware) the stored hash can never match the new combo length.
+    // Detect this on every boot and wipe automatically so the user lands in
+    // first-time setup rather than being permanently locked out after flashing.
+    uint8_t setup_flag = 0;
+    nvs_get_u8(h, KEY_SETUP, &setup_flag);
+    if (setup_flag == 0x01) {
+        uint8_t stored_pinlen = 0;
+        nvs_get_u8(h, KEY_PINLEN, &stored_pinlen);
+        if (stored_pinlen != (uint8_t)PIN_LENGTH) {
+            // Incompatible — wipe and let main loop enter first-time setup.
+            nvs_close(h);
+            storage_wipe();
+            return;
+        }
     }
+
+    // millis() resets on every boot — clear the in-session lockout timestamp.
+    nvs_set_u32(h, KEY_LOCKTS, 0);
+    nvs_commit(h);
+    nvs_close(h);
 }
 
 bool storage_is_setup() {
@@ -79,9 +96,10 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
     nvs_handle_t h;
     if (!nvs_open_rw(&h)) return false;
 
-    nvs_set_u8  (h, KEY_SETUP, 0x01);
-    nvs_set_u8  (h, KEY_WC,    word_count);
-    nvs_set_u8  (h, KEY_FAILS, 0);
+    nvs_set_u8  (h, KEY_SETUP,  0x01);
+    nvs_set_u8  (h, KEY_PINLEN, (uint8_t)PIN_LENGTH);
+    nvs_set_u8  (h, KEY_WC,     word_count);
+    nvs_set_u8  (h, KEY_FAILS,  0);
     nvs_set_u32 (h, KEY_LOCKTS, 0);
     nvs_set_blob(h, KEY_PSALT, psalt, 16);
     nvs_set_blob(h, KEY_PHASH, phash, 32);

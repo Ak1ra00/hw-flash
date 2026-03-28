@@ -183,7 +183,7 @@ void ui_boot() {
 
     // Version tag
     tft.setTextColor(C_DIM, C_BG);
-    tft.drawString("v1.0  |  ak1ra00", DISP_W/2, 122, 1);
+    tft.drawString(FW_VERSION "  |  ak1ra00", DISP_W/2, 122, 1);
 
     delay(1200);   // hold the finished screen — total splash ~7 s
     tft.fillScreen(C_BG);
