@@ -549,7 +549,6 @@ MenuItem ui_main_menu() {
         "Get Password",
         "Settings",
         "About",
-        "Lock Device"
     };
 
     auto draw = [&]() {

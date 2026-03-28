@@ -5,26 +5,17 @@
 // Initialize NVS storage
 void storage_init();
 
-// Returns true if device has been configured (seed + PIN stored)
+// Returns true if device has been configured (seed stored)
 bool storage_is_setup();
 
-// Save the BIP32 master key + chain code, encrypted with the user's PIN.
-// Also saves PIN verification hash.
+// Save the BIP32 master key + chain code, encrypted with a hardware-derived key.
 // Wipes any existing data first.
 bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
-                  const char pin[7], uint8_t word_count);
+                  uint8_t word_count);
 
-// Verify PIN and load decrypted master key + chain code.
-// Returns false if PIN is wrong or data is corrupt.
-// Increments fail counter; locks out after PIN_MAX_ATTEMPTS.
-bool storage_load(const char pin[7],
-                  uint8_t master_key[32], uint8_t master_chain[32]);
-
-// Number of remaining PIN attempts before lockout
-int  storage_attempts_left();
-
-// True if currently locked out (too many wrong PINs)
-bool storage_is_locked_out();
+// Load decrypted master key + chain code.
+// Returns false if data is missing or corrupt.
+bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]);
 
 // Word count stored during setup (12 or 24)
 uint8_t storage_word_count();

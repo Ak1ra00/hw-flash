@@ -23,12 +23,6 @@ bool btns_both();
 // Poll buttons (call each loop tick; updates internal state)
 void btns_poll();
 
-// ── PIN screen ───────────────────────────────────────────────────────────────
-// Interactive PIN entry.  Returns true when user finishes entering 6 digits.
-// pin_out must be 7 bytes (6 digits + null).
-// Shows "Wrong PIN  N attempts left" if wrong = true.
-bool ui_pin_entry(char pin_out[7], bool wrong, int attempts_left, bool locked_out, uint32_t lockout_remaining_ms);
-
 // ── Setup: choose word count ─────────────────────────────────────────────────
 // Returns 12 or 24
 int  ui_choose_word_count();
@@ -50,7 +44,6 @@ enum MenuItem {
     MENU_GET_PASSWORD = 0,
     MENU_SETTINGS,
     MENU_ABOUT,
-    MENU_LOCK,
     MENU_COUNT
 };
 MenuItem ui_main_menu();

@@ -8,7 +8,6 @@
 // ── App state machine ─────────────────────────────────────────────────────────
 enum AppState {
     STATE_BOOT,
-    STATE_PIN_ENTRY,
     STATE_SETUP_WORD_COUNT,
     STATE_SEED_ENTRY,
     STATE_SEED_CONFIRM,
@@ -16,14 +15,12 @@ enum AppState {
     STATE_GET_PASSWORD,
     STATE_SETTINGS,
     STATE_ABOUT,
-    STATE_LOCKED,
 };
 
 static AppState       state          = STATE_BOOT;
 static uint8_t        master_key[32] = {0};
 static uint8_t        master_chain[32]= {0};
 static bool           key_loaded     = false;
-static uint32_t       last_activity  = 0;
 
 // Scratch space for seed entry
 static char           seed_words[24][10];
@@ -34,14 +31,6 @@ static void clear_keys() {
     memset(master_key,   0, 32);
     memset(master_chain, 0, 32);
     key_loaded = false;
-}
-
-static void touch_activity() {
-    last_activity = millis();
-}
-
-static bool idle_timeout() {
-    return key_loaded && ((millis() - last_activity) > AUTO_LOCK_MS);
 }
 
 // ── Setup: gather mnemonic and store ─────────────────────────────────────────
@@ -87,70 +76,20 @@ static void run_setup() {
     bip32_master(seed, 64, master_key, master_chain);
     memset(seed, 0, 64);
 
-    // 6. Set secret combo (3 emoji symbols)
-    ui_message("Set Combo", "Pick 3 emoji symbols\nas your secret combo.", 2000);
-    char pin[7] = {0};
-    char pin2[7] = {0};
-    bool pin_ok = false;
-    while (!pin_ok) {
-        ui_pin_entry(pin,  false, PIN_MAX_ATTEMPTS, false, 0);
-        ui_message("Confirm Combo", "Re-enter your combo.", 1200);
-        ui_pin_entry(pin2, false, PIN_MAX_ATTEMPTS, false, 0);
-        if (strcmp(pin, pin2) == 0) {
-            pin_ok = true;
-        } else {
-            memset(pin, 0, 7); memset(pin2, 0, 7);
-            ui_message("Mismatch", "Combos didn't match.\nTry again.", 1500);
-        }
-    }
-
-    // 7. Save to storage
-    if (!storage_save(master_key, master_chain, pin, (uint8_t)word_count)) {
+    // 6. Save to storage (hardware-bound key, no user PIN required)
+    if (!storage_save(master_key, master_chain, (uint8_t)word_count)) {
         ui_message("Error", "Failed to save.\nDevice may need reset.", 3000);
         clear_keys();
         ESP.restart();
     }
-    memset(pin, 0, 7); memset(pin2, 0, 7);
 
     // Clear seed words from RAM
     for (int i = 0; i < 24; i++) memset(seed_words[i], 0, 10);
 
     key_loaded = true;
-    touch_activity();
 
     ui_message("Success!", "Wallet stored securely.\nEntering vault...", 2000);
     state = STATE_MAIN_MENU;
-}
-
-// ── PIN unlock ────────────────────────────────────────────────────────────────
-static void run_pin_entry() {
-    bool wrong = false;
-    int  attempts_left = storage_attempts_left();
-
-    while (true) {
-        char pin[7] = {0};
-        ui_pin_entry(pin, wrong, attempts_left, false, 0);
-
-        if (storage_load(pin, master_key, master_chain)) {
-            memset(pin, 0, 7);
-            key_loaded = true;
-            touch_activity();
-            state = STATE_MAIN_MENU;
-            return;
-        }
-
-        memset(pin, 0, 7);
-        wrong = true;
-        attempts_left = storage_attempts_left();
-
-        if (attempts_left == 0) {
-            // Security wipe — erase seed and all data, restart as new device
-            ui_message("SECURITY WIPE",
-                       "5 wrong combos.\nErasing all data...", 3000);
-            storage_wipe();
-            ESP.restart();
-        }
-    }
 }
 
 // ── Settings sub-menu ─────────────────────────────────────────────────────────
@@ -162,8 +101,8 @@ static void run_settings() {
         // Confirm then wipe
         ui_message("Factory Reset",
                    "Hold BTN1 3s to wipe\nall data.", 0);
-        uint32_t deadline = millis() + 10000;
-        while (millis() < deadline) {
+        uint32_t start = millis();
+        while (millis() - start < 10000UL) {
             btns_poll();
             if (btn1_long()) {
                 storage_wipe();
@@ -189,54 +128,43 @@ void setup() {
 void loop() {
     btns_poll();
 
-    // Global idle auto-lock
-    if (idle_timeout()) {
-        clear_keys();
-        state = STATE_LOCKED;
-    }
-
     switch (state) {
 
     case STATE_BOOT:
         ui_boot();
-        if (storage_is_setup())
-            state = STATE_PIN_ENTRY;
-        else
+        if (storage_is_setup()) {
+            // Load keys directly — no PIN required
+            if (!storage_load(master_key, master_chain)) {
+                ui_message("Error", "Failed to load seed.\nRe-enter your seed.", 3000);
+                storage_wipe();
+                run_setup();
+            } else {
+                key_loaded = true;
+                state = STATE_MAIN_MENU;
+            }
+        } else {
             run_setup();
-        break;
-
-    case STATE_PIN_ENTRY:
-    case STATE_LOCKED:
-        run_pin_entry();
+        }
         break;
 
     case STATE_MAIN_MENU: {
-        touch_activity();
         MenuItem choice = ui_main_menu();
-        touch_activity();
         switch (choice) {
             case MENU_GET_PASSWORD: state = STATE_GET_PASSWORD; break;
             case MENU_SETTINGS:     run_settings(); break;
             case MENU_ABOUT:        ui_about(); break;
-            case MENU_LOCK:
-                clear_keys();
-                state = STATE_LOCKED;
-                break;
             default: break;
         }
         break;
     }
 
     case STATE_GET_PASSWORD: {
-        touch_activity();
         uint32_t idx = 0;
 
         if (!ui_password_config(&idx)) {
             state = STATE_MAIN_MENU;
             break;
         }
-
-        touch_activity();
 
         ui_message("Deriving...", "Computing password...", 1200);
 
@@ -250,7 +178,6 @@ void loop() {
             memset(pwd, 0, sizeof(pwd));
         }
 
-        touch_activity();
         state = STATE_MAIN_MENU;
         break;
     }
