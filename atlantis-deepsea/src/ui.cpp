@@ -651,30 +651,29 @@ void ui_show_passkey(uint32_t code) {
     tft.setTextColor(C_PIN, C_BG);
     tft.drawString(buf, DISP_W/2, 85, 4);
 
-    draw_footer("", "waiting for pair...");
+    draw_footer("", "any button: dismiss");
 
-    // Wait up to 2 minutes for the pairing to complete or fail
-    uint32_t start = millis();
-    while (millis() - start < 120000UL) {
-        delay(200);
+    // Stay on screen until the user explicitly dismisses.
+    // When pairing completes the status updates in-place but the code
+    // stays visible — user reads it at their own pace then presses a button.
+    while (true) {
+        btns_poll();
+
         if (ble_pair_done_pending()) {
             bool ok = ble_pair_done_success();
             ble_pair_done_clear();
-
-            tft.fillScreen(C_BG);
+            // Update status line only — passkey stays readable
+            tft.fillRect(0, 108, DISP_W, 10, C_BG);
             tft.setTextDatum(MC_DATUM);
-            if (ok) {
-                tft.setTextColor(C_GOOD, C_BG);
-                tft.drawString("Paired!", DISP_W/2, DISP_H/2, 4);
-            } else {
-                tft.setTextColor(C_WARN, C_BG);
-                tft.drawString("Pairing failed", DISP_W/2, DISP_H/2, 2);
-            }
-            delay(1200);
-            return;
+            tft.setTextColor(ok ? C_GOOD : C_WARN, C_BG);
+            tft.drawString(ok ? "Paired!" : "Pairing failed", DISP_W/2, 114, 1);
         }
+
+        if (btn1_short() || btn2_short() || btn1_long() || btn2_long() || btns_both())
+            return;
+
+        delay(10);
     }
-    // Timeout — just return; passkey screen closes silently
 }
 
 // ── Password display ──────────────────────────────────────────────────────────
