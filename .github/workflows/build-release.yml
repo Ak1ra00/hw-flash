@@ -96,6 +96,7 @@ jobs:
           --onefile \
           --console \
           --name "AtlantisDeepSea-Flasher" \
+          --collect-data esptool \
           --add-data "bootloader.bin;." \
           --add-data "partitions.bin;." \
           --add-data "boot_app0.bin;." \

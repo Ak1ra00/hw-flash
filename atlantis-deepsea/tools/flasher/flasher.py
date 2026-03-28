@@ -132,12 +132,12 @@ def main():
         '--chip',   'esp32',
         '--port',   port,
         '--baud',   '921600',
-        '--before', 'default_reset',
-        '--after',  'hard_reset',
-        'write_flash',
-        '--flash_mode', 'dio',
-        '--flash_freq', '80m',
-        '--flash_size', '4MB',
+        '--before', 'default-reset',
+        '--after',  'hard-reset',
+        'write-flash',
+        '--flash-mode', 'dio',
+        '--flash-freq', '80m',
+        '--flash-size', '4MB',
     ]
     for addr, path in bins.items():
         cmd += [addr, path]
