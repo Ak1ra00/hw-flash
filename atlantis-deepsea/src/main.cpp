@@ -1,8 +1,13 @@
 #include <Arduino.h>
+#include <BleKeyboard.h>
 #include "config.h"
 #include "ui.h"
 #include "crypto.h"
 #include "storage.h"
+
+// ── BLE Keyboard instance ─────────────────────────────────────────────────────
+// Appears as "Atlantis DeepSea" in the host's Bluetooth device list.
+static BleKeyboard bleKeyboard("Atlantis DeepSea", "Ak1ra00", 100);
 
 // ── App state machine ─────────────────────────────────────────────────────────
 enum AppState {
@@ -166,6 +171,7 @@ void setup() {
 
     ui_init();
     storage_init();
+    bleKeyboard.begin();   // starts BLE advertising in background
 
     state = STATE_BOOT;
 }
@@ -233,7 +239,19 @@ void loop() {
         if (!ok) {
             ui_message("Error", "Derivation failed.\nTry a different index.", 2500);
         } else {
-            ui_show_password(pwd, idx, len);
+            bool wants_type = ui_show_password(pwd, idx, len, bleKeyboard.isConnected());
+
+            if (wants_type) {
+                if (bleKeyboard.isConnected()) {
+                    bleKeyboard.print(pwd);
+                    delay(200);   // let BLE flush
+                    ui_message("Sent!", "Password typed\ninto active field.", 1800);
+                } else {
+                    // Lost BLE between popup confirm and here — rare but handle it
+                    ui_message("Disconnected", "BLE lost — not sent.\nTry again.", 2200);
+                }
+            }
+
             memset(pwd, 0, sizeof(pwd));
         }
 

@@ -18,6 +18,8 @@ bool btn1_long();
 bool btn2_short();
 // Long press BTN2
 bool btn2_long();
+// Both buttons pressed and released simultaneously
+bool btns_both();
 // Poll buttons (call each loop tick; updates internal state)
 void btns_poll();
 
@@ -60,7 +62,9 @@ bool ui_password_config(uint32_t* index_out, uint8_t* len_out);
 
 // ── Password display ──────────────────────────────────────────────────────────
 // Show password string; auto-clears after PWD_SHOW_MS or button press.
-void ui_show_password(const char* pwd, uint32_t index, uint8_t len);
+// ble_connected: whether BLE keyboard is paired — shows "type" option if true.
+// Returns true if user confirmed the "type via BLE" action.
+bool ui_show_password(const char* pwd, uint32_t index, uint8_t len, bool ble_connected);
 
 // ── Status / messages ────────────────────────────────────────────────────────
 void ui_message(const char* title, const char* body, uint32_t ms);

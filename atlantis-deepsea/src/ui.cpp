@@ -38,6 +38,10 @@ struct BtnState {
 static BtnState b1 = {BTN1_PIN, true, false, 0, false, false, false};
 static BtnState b2 = {BTN2_PIN, true, false, 0, false, false, false};
 
+// Both-button state
+static bool both_active = false;
+static bool both_event  = false;
+
 static void update_btn(BtnState& b) {
     bool raw = (digitalRead(b.pin) == LOW);  // active-low
     b.short_event = false;
@@ -66,12 +70,34 @@ static void update_btn(BtnState& b) {
 void btns_poll() {
     update_btn(b1);
     update_btn(b2);
+
+    both_event = false;
+
+    // Enter both_active when both buttons are held simultaneously
+    if (b1.pressed && b2.pressed && !both_active) {
+        both_active = true;
+    }
+
+    // While both active: suppress all individual events
+    if (both_active) {
+        b1.short_event = false;
+        b2.short_event = false;
+        b1.long_event  = false;
+        b2.long_event  = false;
+    }
+
+    // Fire both_event when both are released
+    if (both_active && !b1.pressed && !b2.pressed) {
+        both_event  = true;
+        both_active = false;
+    }
 }
 
 bool btn1_short() { return b1.short_event; }
 bool btn1_long()  { return b1.long_event;  }
 bool btn2_short() { return b2.short_event; }
 bool btn2_long()  { return b2.long_event;  }
+bool btns_both()  { return both_event;     }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 void ui_init() {
@@ -151,14 +177,14 @@ void ui_boot() {
     for (int i = 0; i <= bar_w - 2; i++) {
         tft.fillRect(bar_x + 1, bar_y + 1, i, bar_h - 2,
                      tft.color565(0, (uint8_t)(100 + i * 80 / bar_w), (uint8_t)(180 + i * 60 / bar_w)));
-        if (i % 6 == 0) delay(12);
+        if (i % 6 == 0) delay(185);   // ~5.5 s for the bar sweep
     }
 
     // Version tag
     tft.setTextColor(C_DIM, C_BG);
     tft.drawString("v1.0  |  ak1ra00", DISP_W/2, 122, 1);
 
-    delay(600);
+    delay(1200);   // hold the finished screen — total splash ~7 s
     tft.fillScreen(C_BG);
 }
 
@@ -388,20 +414,23 @@ void ui_enter_word(int word_num, int total, char out[10]) {
             if (match_count == 1 && phase == PHASE_LETTER) {
                 tft.setTextColor(C_GOOD, C_BG);
                 tft.setTextDatum(MR_DATUM);
-                tft.drawString("BTN2:accept", DISP_W - 10, wy, 1);
+                tft.drawString("BOTH:accept", DISP_W - 10, wy, 1);
             }
         }
 
         // Footer
         if (phase == PHASE_LETTER) {
             if (match_count == 1)
-                draw_footer("BTN1:next letter", "BTN2:accept word");
+                draw_footer("1:next  2:prev", "BOTH: accept word");
             else
-                draw_footer("BTN1:next letter", "BTN2:add letter");
+                draw_footer("1:next  2:prev", "BOTH: add letter");
         } else {
-            draw_footer("BTN1:scroll", "BTN2:select word");
+            draw_footer("1:next  2:prev", "BOTH: pick word");
         }
     };
+
+    // Helper: show inline hint when the auto-complete indicator renders
+    // (the draw lambda already handles it via match_count==1 in PHASE_LETTER)
 
     update_matches();
     draw();
@@ -410,13 +439,20 @@ void ui_enter_word(int word_num, int total, char out[10]) {
         btns_poll();
 
         if (phase == PHASE_LETTER) {
+            // BTN1 → next letter (forward)
             if (btn1_short()) {
                 cur_letter = (cur_letter + 1) % 27;  // 0-25=letters, 26=backspace
                 draw();
             }
 
+            // BTN2 → prev letter (backward)
+            if (btn2_short()) {
+                cur_letter = (cur_letter - 1 + 27) % 27;
+                draw();
+            }
+
+            // BTN1 long → quick backspace
             if (btn1_long()) {
-                // Backspace
                 if (prefix_len > 0) {
                     prefix[--prefix_len] = '\0';
                     cur_letter = 0;
@@ -425,14 +461,21 @@ void ui_enter_word(int word_num, int total, char out[10]) {
                 }
             }
 
-            if (btn2_short()) {
+            // BTN2 long → force switch to pick mode
+            if (btn2_long() && match_count > 0) {
+                phase = PHASE_PICK;
+                draw();
+            }
+
+            // BOTH → confirm: add letter, backspace, or accept sole match
+            if (btns_both()) {
                 if (match_count == 1) {
-                    // Accept the only match
+                    // Accept the only match directly
                     strncpy(out, BIP39_WORDLIST[match_indices[0]], 9);
                     out[9] = '\0';
                     return;
                 } else if (cur_letter == 26) {
-                    // Backspace
+                    // Backspace position confirmed
                     if (prefix_len > 0) {
                         prefix[--prefix_len] = '\0';
                         cur_letter = 0;
@@ -440,7 +483,7 @@ void ui_enter_word(int word_num, int total, char out[10]) {
                         draw();
                     }
                 } else if (prefix_len < 8) {
-                    // Add letter
+                    // Add selected letter
                     prefix[prefix_len++] = LETTERS[cur_letter];
                     prefix[prefix_len]   = '\0';
                     cur_letter = 0;
@@ -450,27 +493,29 @@ void ui_enter_word(int word_num, int total, char out[10]) {
                     draw();
                 }
             }
-
-            if (btn2_long() && match_count > 0) {
-                // Force switch to pick mode
-                phase = PHASE_PICK;
-                draw();
-            }
         } else {
             // PHASE_PICK
+            // BTN1 → next match (forward)
             if (btn1_short()) {
                 sel = (sel + 1) % match_count;
                 draw();
             }
 
+            // BTN2 → prev match (backward)
+            if (btn2_short()) {
+                sel = (sel - 1 + match_count) % match_count;
+                draw();
+            }
+
+            // BTN1 long → back to letter phase
             if (btn1_long()) {
-                // Back to letter phase
                 phase = PHASE_LETTER;
                 cur_letter = 0;
                 draw();
             }
 
-            if (btn2_short()) {
+            // BOTH → select highlighted word
+            if (btns_both()) {
                 strncpy(out, BIP39_WORDLIST[match_indices[sel]], 9);
                 out[9] = '\0';
                 return;
@@ -640,50 +685,100 @@ bool ui_password_config(uint32_t* index_out, uint8_t* len_out) {
 }
 
 // ── Password display ──────────────────────────────────────────────────────────
-void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
-    tft.fillScreen(C_BG);
-    draw_header("Password");
+bool ui_show_password(const char* pwd, uint32_t index, uint8_t len, bool ble_connected) {
 
-    // Metadata
-    char meta[32];
-    snprintf(meta, sizeof(meta), "idx:%lu  len:%d", index, len);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(C_DIM, C_BG);
-    tft.drawString(meta, DISP_W/2, 33, 1);
-    draw_divider(40);
+    auto draw_pwd_screen = [&]() {
+        tft.fillScreen(C_BG);
+        draw_header("Password");
 
-    // Password text — split into 2 lines if long
-    tft.setTextColor(C_ACCENT, C_BG);
-    if (len <= 22) {
-        tft.drawString(pwd, DISP_W/2, 72, 2);
-    } else {
-        // Two lines
-        int half = len / 2;
-        char line1[44], line2[44];
-        strncpy(line1, pwd,        half); line1[half] = '\0';
-        strncpy(line2, pwd + half, len - half); line2[len - half] = '\0';
-        tft.drawString(line1, DISP_W/2, 60, 1);
-        tft.drawString(line2, DISP_W/2, 74, 1);
-    }
+        char meta[32];
+        snprintf(meta, sizeof(meta), "idx:%lu  len:%d", index, len);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextColor(C_DIM, C_BG);
+        tft.drawString(meta, DISP_W/2, 33, 1);
+        draw_divider(40);
 
-    // Countdown bar
-    uint32_t start = millis();
+        tft.setTextColor(C_ACCENT, C_BG);
+        if (len <= 22) {
+            tft.drawString(pwd, DISP_W/2, 72, 2);
+        } else {
+            int half = len / 2;
+            char line1[44], line2[44];
+            strncpy(line1, pwd,        half); line1[half] = '\0';
+            strncpy(line2, pwd + half, len - half); line2[len - half] = '\0';
+            tft.drawString(line1, DISP_W/2, 60, 1);
+            tft.drawString(line2, DISP_W/2, 74, 1);
+        }
+
+        if (ble_connected)
+            draw_footer("BTN1: type via BLE", "BTN2: clear");
+        else
+            draw_footer("pair BLE to type", "BTN2: clear");
+    };
+
+    draw_pwd_screen();
+
+    uint32_t start   = millis();
     uint32_t timeout = PWD_SHOW_MS;
 
     while (true) {
         btns_poll();
-        if (btn1_short() || btn2_short() || btn1_long() || btn2_long()) break;
+
+        // BTN2 → clear immediately
+        if (btn2_short() || btn2_long()) break;
+
+        // BTN1 → type via BLE (or pair hint)
+        if (btn1_short()) {
+            if (ble_connected) {
+                // "Get ready" confirmation popup
+                tft.fillRoundRect(14, 27, DISP_W - 28, 82, 8, C_BOX);
+                tft.drawRoundRect(14, 27, DISP_W - 28, 82, 8, tft.color565(0, 150, 200));
+                tft.setTextDatum(MC_DATUM);
+                tft.setTextColor(C_ACCENT, C_BOX);
+                tft.drawString("READY TO TYPE?", DISP_W/2, 43, 1);
+                draw_divider(52, tft.color565(0, 80, 110));
+                tft.setTextColor(C_TEXT, C_BOX);
+                tft.drawString("1. Click in password field", DISP_W/2, 65, 1);
+                tft.drawString("2. Press confirm to send", DISP_W/2, 79, 1);
+                tft.setTextColor(C_DIM, C_BOX);
+                tft.drawString("BTN1: cancel   BTN2: send ->", DISP_W/2, 97, 1);
+
+                bool confirmed = false;
+                while (true) {
+                    btns_poll();
+                    if (btn2_short()) { confirmed = true; break; }
+                    if (btn1_short() || btn1_long()) { break; }
+                    delay(8);
+                }
+                if (confirmed) return true;
+                draw_pwd_screen();   // user cancelled → back to password
+            } else {
+                // BLE not paired — show pairing hint overlay
+                tft.fillRoundRect(14, 38, DISP_W - 28, 58, 8, C_BOX);
+                tft.drawRoundRect(14, 38, DISP_W - 28, 58, 8, C_WARN);
+                tft.setTextDatum(MC_DATUM);
+                tft.setTextColor(C_WARN, C_BOX);
+                tft.drawString("BLE not paired", DISP_W/2, 53, 1);
+                tft.setTextColor(C_DIM, C_BOX);
+                tft.drawString("Search Bluetooth for:", DISP_W/2, 68, 1);
+                tft.setTextColor(C_ACCENT, C_BOX);
+                tft.drawString("\"Atlantis DeepSea\"", DISP_W/2, 81, 1);
+                delay(2800);
+                draw_pwd_screen();
+            }
+        }
 
         uint32_t elapsed = millis() - start;
         if (elapsed >= timeout) break;
 
         uint32_t remain_s = (timeout - elapsed) / 1000 + 1;
 
-        // Countdown bar
-        int bar_w = DISP_W - 20;
+        int bar_w  = DISP_W - 20;
         int filled = (int)(bar_w * (timeout - elapsed) / timeout);
         tft.fillRect(10, 98, bar_w, 6, C_BOX);
-        tft.fillRect(10, 98, filled, 6, tft.color565(0, (uint8_t)(150 * filled / bar_w), (uint8_t)(200 * filled / bar_w)));
+        tft.fillRect(10, 98, filled, 6,
+                     tft.color565(0, (uint8_t)(150 * filled / bar_w),
+                                     (uint8_t)(200 * filled / bar_w)));
 
         char cd[16];
         snprintf(cd, sizeof(cd), "Clears in %lus", remain_s);
@@ -695,12 +790,12 @@ void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
         delay(250);
     }
 
-    // Wipe display
     tft.fillScreen(C_BG);
     tft.setTextColor(C_DIM, C_BG);
     tft.setTextDatum(MC_DATUM);
     tft.drawString("Cleared.", DISP_W/2, DISP_H/2, 2);
     delay(800);
+    return false;
 }
 
 // ── Generic message ───────────────────────────────────────────────────────────
