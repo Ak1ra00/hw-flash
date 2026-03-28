@@ -77,19 +77,34 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
     nvs_handle_t h;
     if (!nvs_open_rw(&h)) return false;
 
-    nvs_set_u8  (h, KEY_SETUP,  0x01);
-    nvs_set_u8  (h, KEY_WC,     word_count);
-    nvs_set_blob(h, KEY_PSALT, psalt, 16);
-    nvs_set_blob(h, KEY_PHASH, phash, 32);
-    nvs_set_blob(h, KEY_CSALT, csalt, 16);
-    nvs_set_blob(h, KEY_CIV,   civ,   16);
-    nvs_set_blob(h, KEY_CDATA, cipher, clen);
+    // Erase any previous entries so no stale/partial data remains
+    nvs_erase_all(h);
     nvs_commit(h);
-    nvs_close(h);
 
+    // Write all blobs first; KEY_SETUP is written LAST so that
+    // storage_is_setup() is only true when every entry is present.
+    bool ok = true;
+    ok = ok && (nvs_set_u8  (h, KEY_WC,    word_count)    == ESP_OK);
+    ok = ok && (nvs_set_blob(h, KEY_PSALT, psalt, 16)     == ESP_OK);
+    ok = ok && (nvs_set_blob(h, KEY_PHASH, phash, 32)     == ESP_OK);
+    ok = ok && (nvs_set_blob(h, KEY_CSALT, csalt, 16)     == ESP_OK);
+    ok = ok && (nvs_set_blob(h, KEY_CIV,   civ,   16)     == ESP_OK);
+    ok = ok && (nvs_set_blob(h, KEY_CDATA, cipher, clen)  == ESP_OK);
+
+    if (ok) ok = (nvs_set_u8(h, KEY_SETUP, 0x01) == ESP_OK);
+
+    if (ok) {
+        nvs_commit(h);
+    } else {
+        // Partial write — leave NVS clean so storage_is_setup() stays false
+        nvs_erase_all(h);
+        nvs_commit(h);
+    }
+
+    nvs_close(h);
     memset(phash, 0, 32);
     memset(civ,   0, 16);
-    return true;
+    return ok;
 }
 
 bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]) {

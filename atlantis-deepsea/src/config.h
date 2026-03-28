@@ -1,7 +1,7 @@
 #pragma once
 
 // ── Firmware version (keep in sync with VERSION file) ─────────────────────────
-#define FW_VERSION      "v1.2.13"
+#define FW_VERSION      "v1.2.14"
 
 // ── Hardware ────────────────────────────────────────────────────────────────
 #define BTN1_PIN        35      // Top button (increment)
