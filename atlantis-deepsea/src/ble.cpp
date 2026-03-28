@@ -79,17 +79,17 @@ void ble_type(const char* str) {
 // Erase all stored BLE bonding info.  The next connection will require
 // re-pairing with a passkey.
 void ble_forget_bonds() {
-    int num = esp_ble_gap_get_bond_device_num();
+    int num = esp_ble_get_bond_device_num();
     if (num <= 0) return;
     esp_ble_bond_dev_t* list = new esp_ble_bond_dev_t[num];
-    esp_ble_gap_get_bond_device_list(&num, list);
+    esp_ble_get_bond_device_list(&num, list);
     for (int i = 0; i < num; i++)
-        esp_ble_gap_remove_bond_device(list[i].bd_addr);
+        esp_ble_remove_bond_device(list[i].bd_addr);
     delete[] list;
 }
 
 int ble_bond_count() {
-    return esp_ble_gap_get_bond_device_num();
+    return esp_ble_get_bond_device_num();
 }
 
 uint32_t ble_passkey_pending() { return s_passkey;   }
