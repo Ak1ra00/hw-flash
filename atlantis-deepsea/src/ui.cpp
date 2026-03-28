@@ -826,7 +826,7 @@ void ui_about() {
     tft.setTextDatum(ML_DATUM);
     int y = 36;
     struct { const char* text; uint16_t col; } lines[] = {
-        {"Atlantis DeepSea  v1.0",   C_ACCENT},
+        {"Atlantis DeepSea  " FW_VERSION, C_ACCENT},
         {"BIP85 Password Manager",   C_ACCENT},
         {"",                         C_BG},
         {"Device: LilyGO T-Display", C_DIM},

@@ -31,31 +31,13 @@ void storage_init() {
         nvs_flash_init();
     }
 
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return;
-
-    // ── Format-version guard ─────────────────────────────────────────────────
-    // If the device was set up with a different PIN_LENGTH (e.g. old 6-digit
-    // PIN firmware) the stored hash can never match the new combo length.
-    // Detect this on every boot and wipe automatically so the user lands in
-    // first-time setup rather than being permanently locked out after flashing.
-    uint8_t setup_flag = 0;
-    nvs_get_u8(h, KEY_SETUP, &setup_flag);
-    if (setup_flag == 0x01) {
-        uint8_t stored_pinlen = 0;
-        nvs_get_u8(h, KEY_PINLEN, &stored_pinlen);
-        if (stored_pinlen != (uint8_t)PIN_LENGTH) {
-            // Incompatible — wipe and let main loop enter first-time setup.
-            nvs_close(h);
-            storage_wipe();
-            return;
-        }
-    }
-
     // millis() resets on every boot — clear the in-session lockout timestamp.
-    nvs_set_u32(h, KEY_LOCKTS, 0);
-    nvs_commit(h);
-    nvs_close(h);
+    nvs_handle_t h;
+    if (nvs_open_rw(&h)) {
+        nvs_set_u32(h, KEY_LOCKTS, 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
 }
 
 bool storage_is_setup() {
