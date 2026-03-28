@@ -651,88 +651,37 @@ bool ui_password_config(uint32_t* index_out) {
 }
 
 // ── Password display ──────────────────────────────────────────────────────────
-bool ui_show_password(const char* pwd, uint32_t index, uint8_t len, bool ble_connected) {
+void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
+    tft.fillScreen(C_BG);
+    draw_header("Password");
 
-    auto draw_pwd_screen = [&]() {
-        tft.fillScreen(C_BG);
-        draw_header("Password");
+    char meta[32];
+    snprintf(meta, sizeof(meta), "index: %lu", index);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(C_DIM, C_BG);
+    tft.drawString(meta, DISP_W/2, 33, 1);
+    draw_divider(40);
 
-        char meta[32];
-        snprintf(meta, sizeof(meta), "idx:%lu  len:%d", index, len);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextColor(C_DIM, C_BG);
-        tft.drawString(meta, DISP_W/2, 33, 1);
-        draw_divider(40);
+    tft.setTextColor(C_ACCENT, C_BG);
+    if (len <= 22) {
+        tft.drawString(pwd, DISP_W/2, 72, 2);
+    } else {
+        int half = len / 2;
+        char line1[44], line2[44];
+        strncpy(line1, pwd,        half); line1[half] = '\0';
+        strncpy(line2, pwd + half, len - half); line2[len - half] = '\0';
+        tft.drawString(line1, DISP_W/2, 60, 1);
+        tft.drawString(line2, DISP_W/2, 74, 1);
+    }
 
-        tft.setTextColor(C_ACCENT, C_BG);
-        if (len <= 22) {
-            tft.drawString(pwd, DISP_W/2, 72, 2);
-        } else {
-            int half = len / 2;
-            char line1[44], line2[44];
-            strncpy(line1, pwd,        half); line1[half] = '\0';
-            strncpy(line2, pwd + half, len - half); line2[len - half] = '\0';
-            tft.drawString(line1, DISP_W/2, 60, 1);
-            tft.drawString(line2, DISP_W/2, 74, 1);
-        }
-
-        if (ble_connected)
-            draw_footer("BTN1: type via BLE", "BTN2: clear");
-        else
-            draw_footer("pair BLE to type", "BTN2: clear");
-    };
-
-    draw_pwd_screen();
+    draw_footer("", "any button: clear");
 
     uint32_t start   = millis();
     uint32_t timeout = PWD_SHOW_MS;
 
     while (true) {
         btns_poll();
-
-        // BTN2 → clear immediately
-        if (btn2_short() || btn2_long()) break;
-
-        // BTN1 → type via BLE (or pair hint)
-        if (btn1_short()) {
-            if (ble_connected) {
-                // "Get ready" confirmation popup
-                tft.fillRoundRect(14, 27, DISP_W - 28, 82, 8, C_BOX);
-                tft.drawRoundRect(14, 27, DISP_W - 28, 82, 8, tft.color565(0, 150, 200));
-                tft.setTextDatum(MC_DATUM);
-                tft.setTextColor(C_ACCENT, C_BOX);
-                tft.drawString("READY TO TYPE?", DISP_W/2, 43, 1);
-                draw_divider(52, tft.color565(0, 80, 110));
-                tft.setTextColor(C_TEXT, C_BOX);
-                tft.drawString("1. Click in password field", DISP_W/2, 65, 1);
-                tft.drawString("2. Press confirm to send", DISP_W/2, 79, 1);
-                tft.setTextColor(C_DIM, C_BOX);
-                tft.drawString("BTN1: cancel   BTN2: send ->", DISP_W/2, 97, 1);
-
-                bool confirmed = false;
-                while (true) {
-                    btns_poll();
-                    if (btn2_short()) { confirmed = true; break; }
-                    if (btn1_short() || btn1_long()) { break; }
-                    delay(8);
-                }
-                if (confirmed) return true;
-                draw_pwd_screen();   // user cancelled → back to password
-            } else {
-                // BLE not paired — show pairing hint overlay
-                tft.fillRoundRect(14, 38, DISP_W - 28, 58, 8, C_BOX);
-                tft.drawRoundRect(14, 38, DISP_W - 28, 58, 8, C_WARN);
-                tft.setTextDatum(MC_DATUM);
-                tft.setTextColor(C_WARN, C_BOX);
-                tft.drawString("BLE not paired", DISP_W/2, 53, 1);
-                tft.setTextColor(C_DIM, C_BOX);
-                tft.drawString("Search Bluetooth for:", DISP_W/2, 68, 1);
-                tft.setTextColor(C_ACCENT, C_BOX);
-                tft.drawString("\"Atlantis DeepSea\"", DISP_W/2, 81, 1);
-                delay(2800);
-                draw_pwd_screen();
-            }
-        }
+        if (btn1_short() || btn2_short() || btn1_long() || btn2_long() || btns_both()) break;
 
         uint32_t elapsed = millis() - start;
         if (elapsed >= timeout) break;
@@ -761,7 +710,6 @@ bool ui_show_password(const char* pwd, uint32_t index, uint8_t len, bool ble_con
     tft.setTextDatum(MC_DATUM);
     tft.drawString("Cleared.", DISP_W/2, DISP_H/2, 2);
     delay(800);
-    return false;
 }
 
 // ── Generic message ───────────────────────────────────────────────────────────

@@ -1,13 +1,8 @@
 #include <Arduino.h>
-#include <BleKeyboard.h>
 #include "config.h"
 #include "ui.h"
 #include "crypto.h"
 #include "storage.h"
-
-// ── BLE Keyboard instance ─────────────────────────────────────────────────────
-// Appears as "Atlantis DeepSea" in the host's Bluetooth device list.
-static BleKeyboard bleKeyboard("Atlantis DeepSea", "Ak1ra00", 100);
 
 // ── App state machine ─────────────────────────────────────────────────────────
 enum AppState {
@@ -166,16 +161,8 @@ static void run_settings() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-
     ui_init();
-
-    // Initialise BLE FIRST so its internal NVS calls complete before we open
-    // the "atlantis" namespace.  Reversed order was causing the BLE stack to
-    // reinitialise NVS after our handle was opened, invalidating it silently.
-    bleKeyboard.begin();
-
-    storage_init();   // opens NVS after BLE stack is stable
-
+    storage_init();
     state = STATE_BOOT;
 }
 
@@ -239,19 +226,7 @@ void loop() {
         if (!ok) {
             ui_message("Error", "Derivation failed.\nTry a different index.", 2500);
         } else {
-            bool wants_type = ui_show_password(pwd, idx, PWD_LEN_FIXED, bleKeyboard.isConnected());
-
-            if (wants_type) {
-                if (bleKeyboard.isConnected()) {
-                    bleKeyboard.print(pwd);
-                    delay(200);   // let BLE flush
-                    ui_message("Sent!", "Password typed\ninto active field.", 1800);
-                } else {
-                    // Lost BLE between popup confirm and here — rare but handle it
-                    ui_message("Disconnected", "BLE lost — not sent.\nTry again.", 2200);
-                }
-            }
-
+            ui_show_password(pwd, idx, PWD_LEN_FIXED);
             memset(pwd, 0, sizeof(pwd));
         }
 

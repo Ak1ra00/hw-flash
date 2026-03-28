@@ -61,10 +61,8 @@ MenuItem ui_main_menu();
 bool ui_password_config(uint32_t* index_out);
 
 // ── Password display ──────────────────────────────────────────────────────────
-// Show password string; auto-clears after PWD_SHOW_MS or button press.
-// ble_connected: whether BLE keyboard is paired — shows "type" option if true.
-// Returns true if user confirmed the "type via BLE" action.
-bool ui_show_password(const char* pwd, uint32_t index, uint8_t len, bool ble_connected);
+// Show password string; auto-clears after PWD_SHOW_MS or any button press.
+void ui_show_password(const char* pwd, uint32_t index, uint8_t len);
 
 // ── Status / messages ────────────────────────────────────────────────────────
 void ui_message(const char* title, const char* body, uint32_t ms);
