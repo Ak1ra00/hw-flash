@@ -1,4 +1,5 @@
 #include "ble.h"
+#include <Arduino.h>
 #include <BleKeyboard.h>
 #include <BLEDevice.h>
 #include <BLESecurity.h>
