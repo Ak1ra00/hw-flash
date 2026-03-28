@@ -57,13 +57,23 @@ void ble_init() {
 
 bool ble_connected() { return bleKb.isConnected(); }
 
-// Type a string via BLE HID then send an explicit key-up report so the
-// last character does not repeat.
+// Type a string via BLE HID.
+// Each character is sent individually with a small inter-key delay so the
+// HID reports have time to flush through the BLE stack before the next one
+// is queued.  A final releaseAll() with extra hold time guarantees the
+// host sees a clean key-up for the last character.
 void ble_type(const char* str) {
     if (!bleKb.isConnected()) return;
-    bleKb.print(str);
-    delay(20);          // let the HID report flush
-    bleKb.releaseAll(); // explicit key-up clears the "last char repeating" bug
+    bleKb.releaseAll();   // clear any lingering state first
+    delay(20);
+    for (const char* p = str; *p; p++) {
+        bleKb.write((uint8_t)*p);
+        delay(10);        // one BLE connection event at typical 7.5 ms interval
+    }
+    delay(80);            // let the last key-up report reach the host
+    bleKb.releaseAll();   // explicit all-keys-up
+    delay(20);
+    bleKb.releaseAll();   // second send for safety
 }
 
 // Erase all stored BLE bonding info.  The next connection will require
@@ -76,6 +86,10 @@ void ble_forget_bonds() {
     for (int i = 0; i < num; i++)
         esp_ble_gap_remove_bond_device(list[i].bd_addr);
     delete[] list;
+}
+
+int ble_bond_count() {
+    return esp_ble_gap_get_bond_device_num();
 }
 
 uint32_t ble_passkey_pending() { return s_passkey;   }

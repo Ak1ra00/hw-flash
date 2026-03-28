@@ -31,10 +31,13 @@ void storage_init() {
         nvs_flash_init();
     }
 
-    // millis() resets on every boot — clear the in-session lockout timestamp.
+    // millis() resets on every boot — clear the in-session lockout state.
+    // Also reset the failure counter so a legitimate reboot gives a fresh
+    // set of attempts (the 5-attempt wipe is a per-session protection).
     nvs_handle_t h;
     if (nvs_open_rw(&h)) {
         nvs_set_u32(h, KEY_LOCKTS, 0);
+        nvs_set_u8 (h, KEY_FAILS,  0);
         nvs_commit(h);
         nvs_close(h);
     }

@@ -8,7 +8,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
-#include <esp_gap_ble_api.h>
 
 // ── Display instance ─────────────────────────────────────────────────────────
 static TFT_eSPI tft = TFT_eSPI();
@@ -904,7 +903,7 @@ void ui_ble_settings() {
         tft.drawString(conn ? "Connected" : "Advertising...", 70, 36, 1);
 
         // Bonded device count
-        int bonds = esp_ble_gap_get_bond_device_num();
+        int bonds = ble_bond_count();
         tft.setTextColor(C_DIM, C_BG);
         tft.drawString("Bonded devices:", 12, 54, 1);
         char buf[8];

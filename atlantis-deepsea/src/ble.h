@@ -12,6 +12,8 @@ void     ble_type(const char* str);  // prints + releaseAll to prevent key repea
 
 // Remove all stored bonded devices (user must re-pair with passkey).
 void     ble_forget_bonds();
+// Number of currently bonded devices stored in NVS.
+int      ble_bond_count();
 
 // Passkey notification: set by BLE security callback when the host requests
 // passkey-based pairing.  Check with ble_passkey_pending(); call
