@@ -135,7 +135,6 @@ def main():
         '--before', 'default-reset',
         '--after',  'hard-reset',
         'write-flash',
-        '--erase-all',          # wipe entire flash (incl. NVS) on every flash
         '--flash-mode', 'dio',
         '--flash-freq', '80m',
         '--flash-size', '4MB',
