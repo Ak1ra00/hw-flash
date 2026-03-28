@@ -138,11 +138,12 @@ void loop() {
                 key_loaded = true;
                 state = STATE_MAIN_MENU;
             } else {
-                // Load failed — show error but do NOT wipe.
-                // User can factory-reset via Settings if needed.
-                ui_message("Load Error",
-                           "Cannot read seed.\nUse Settings > Factory\nReset to reconfigure.", 0);
-                state = STATE_MAIN_MENU;
+                // Stored data is unreadable (likely saved by an older firmware
+                // version with a different encryption scheme).  Wipe and re-enter.
+                ui_message("Re-enter Seed",
+                           "Seed needs re-entry\n(firmware updated).\nPlease re-enter now.", 3000);
+                storage_wipe();
+                run_setup();
             }
         } else {
             run_setup();
@@ -161,6 +162,12 @@ void loop() {
     }
 
     case STATE_GET_PASSWORD: {
+        if (!key_loaded) {
+            ui_message("No Seed", "No seed loaded.\nUse Settings >\nFactory Reset.", 3000);
+            state = STATE_MAIN_MENU;
+            break;
+        }
+
         uint32_t idx = 0;
 
         if (!ui_password_config(&idx)) {
