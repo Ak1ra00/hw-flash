@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <esp_gap_ble_api.h>
 
 // ── Display instance ─────────────────────────────────────────────────────────
 static TFT_eSPI tft = TFT_eSPI();
@@ -583,6 +584,15 @@ MenuItem ui_main_menu() {
     draw();
     while (true) {
         btns_poll();
+
+        // Handle BLE passkey pairing requests from any page
+        if (ble_passkey_pending()) {
+            uint32_t pk = ble_passkey_pending();
+            ble_passkey_clear();
+            ui_show_passkey(pk);
+            draw();
+        }
+
         if (btn1_short()) { sel = (sel + 1) % MENU_COUNT; draw(); }
         if (btn2_short()) { sel = (sel - 1 + MENU_COUNT) % MENU_COUNT; draw(); }
         if (btns_both())   return (MenuItem)sel;
@@ -678,10 +688,6 @@ void ui_show_passkey(uint32_t code) {
 
 // ── Password display ──────────────────────────────────────────────────────────
 void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
-    // BLE is only active while the password is on screen.
-    // Disabling on exit restores the host's on-screen keyboard.
-    ble_enable();
-
     auto redraw_screen = [&]() {
         tft.fillScreen(C_BG);
         draw_header("Password");
@@ -760,9 +766,6 @@ void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
 
         delay(10);
     }
-
-    // Stop advertising and disconnect — host's soft keyboard is restored.
-    ble_disable();
 
     tft.fillScreen(C_BG);
     tft.setTextColor(C_DIM, C_BG);
@@ -843,6 +846,113 @@ void ui_about() {
 
     draw_footer("", "BOTH / BTN2: back");
     while (true) { btns_poll(); if (btn2_short() || btns_both()) break; delay(8); }
+}
+
+// ── Settings menu ─────────────────────────────────────────────────────────────
+SettingsItem ui_settings_menu() {
+    int sel = 0;
+    const char* labels[SETTINGS_COUNT] = {
+        "Bluetooth",
+        "Factory Reset",
+    };
+
+    auto draw = [&]() {
+        tft.fillScreen(C_BG);
+        draw_header("Settings");
+
+        for (int i = 0; i < SETTINGS_COUNT; i++) {
+            int oy = 36 + i * 26;
+            if (i == sel) {
+                tft.fillRoundRect(8, oy - 7, DISP_W - 16, 18, 3, tft.color565(0, 40, 60));
+                tft.setTextDatum(ML_DATUM);
+                tft.setTextColor(C_SEL, tft.color565(0, 40, 60));
+                tft.drawString("> ", 12, oy, 2);
+                tft.drawString(labels[i], 30, oy, 2);
+            } else {
+                tft.setTextDatum(ML_DATUM);
+                tft.setTextColor(C_DIM, C_BG);
+                tft.drawString(labels[i], 30, oy, 2);
+            }
+        }
+
+        draw_footer("1:down  2:up", "BOTH: select");
+    };
+
+    draw();
+    while (true) {
+        btns_poll();
+        if (btn1_short()) { sel = (sel + 1) % SETTINGS_COUNT; draw(); }
+        if (btn2_short()) { sel = (sel - 1 + SETTINGS_COUNT) % SETTINGS_COUNT; draw(); }
+        if (btns_both())   return (SettingsItem)sel;
+        if (btn1_long())   return SETTINGS_COUNT; // back (out of range — caller ignores)
+        delay(8);
+    }
+}
+
+// ── Bluetooth settings ─────────────────────────────────────────────────────────
+void ui_ble_settings() {
+    auto draw = [&]() {
+        tft.fillScreen(C_BG);
+        draw_header("Bluetooth");
+
+        // Connection status
+        bool conn = ble_connected();
+        tft.setTextDatum(ML_DATUM);
+        tft.setTextColor(C_DIM, C_BG);
+        tft.drawString("Status:", 12, 36, 1);
+        tft.setTextColor(conn ? C_GOOD : C_ACCENT, C_BG);
+        tft.drawString(conn ? "Connected" : "Advertising...", 70, 36, 1);
+
+        // Bonded device count
+        int bonds = esp_ble_gap_get_bond_device_num();
+        tft.setTextColor(C_DIM, C_BG);
+        tft.drawString("Bonded devices:", 12, 54, 1);
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", bonds);
+        tft.setTextColor(C_TEXT, C_BG);
+        tft.drawString(buf, 126, 54, 1);
+
+        // Info line
+        tft.setTextColor(C_DIM, C_BG);
+        tft.drawString("BLE always on.", 12, 72, 1);
+        tft.drawString("Device: Atlantis DeepSea", 12, 84, 1);
+
+        draw_footer("1: forget devices", "BOTH / 2: back");
+    };
+
+    draw();
+
+    while (true) {
+        btns_poll();
+
+        // BTN1 short = forget all bonds (with confirmation)
+        if (btn1_short()) {
+            tft.fillScreen(C_BG);
+            draw_header("Forget Devices?");
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextColor(C_WARN, C_BG);
+            tft.drawString("Remove all paired", DISP_W/2, 50, 2);
+            tft.drawString("devices?", DISP_W/2, 72, 2);
+            draw_footer("1: confirm", "2 / BOTH: cancel");
+
+            bool confirmed = false;
+            while (true) {
+                btns_poll();
+                if (btn1_short()) { confirmed = true; break; }
+                if (btn2_short() || btns_both()) break;
+                delay(8);
+            }
+
+            if (confirmed) {
+                ble_forget_bonds();
+                ui_message("Done", "All bonds removed.\nRe-pair next connect.", 2000);
+            }
+            draw();
+        }
+
+        if (btn2_short() || btns_both()) return;
+        delay(8);
+    }
 }
 
 // ── Wipe confirm ──────────────────────────────────────────────────────────────

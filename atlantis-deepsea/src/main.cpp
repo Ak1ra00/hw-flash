@@ -155,8 +155,26 @@ static void run_pin_entry() {
 
 // ── Settings sub-menu ─────────────────────────────────────────────────────────
 static void run_settings() {
-    ui_message("Settings",
-               "Hold BTN1 at boot to\ndo factory reset.", 0);
+    SettingsItem choice = ui_settings_menu();
+    if (choice == SETTINGS_BLUETOOTH) {
+        ui_ble_settings();
+    } else if (choice == SETTINGS_FACTORY_RESET) {
+        // Confirm then wipe
+        ui_message("Factory Reset",
+                   "Hold BTN1 3s to wipe\nall data.", 0);
+        uint32_t deadline = millis() + 10000;
+        while (millis() < deadline) {
+            btns_poll();
+            if (btn1_long()) {
+                storage_wipe();
+                ui_message("Wiped", "All data erased.\nRestarting...", 2000);
+                ESP.restart();
+            }
+            if (btn2_short() || btns_both()) break;
+            delay(8);
+        }
+    }
+    // SETTINGS_COUNT (back) or unknown — return to menu
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

@@ -73,6 +73,16 @@ void ui_about();
 void ui_seed_invalid();
 
 // ── BLE passkey display ────────────────────────────────────────────────────────
-// Show a 6-digit BLE pairing passkey.  Blocks until pairing completes or
-// times out (~2 min).  Caller must clear ble_passkey_pending() first.
+// Show a 6-digit BLE pairing passkey.  Stays on screen until user dismisses.
 void ui_show_passkey(uint32_t code);
+
+// ── Settings menu ─────────────────────────────────────────────────────────────
+enum SettingsItem {
+    SETTINGS_BLUETOOTH = 0,
+    SETTINGS_FACTORY_RESET,
+    SETTINGS_COUNT
+};
+SettingsItem ui_settings_menu();
+
+// ── Bluetooth settings screen ─────────────────────────────────────────────────
+void ui_ble_settings();
