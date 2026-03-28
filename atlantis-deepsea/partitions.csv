@@ -1,0 +1,8 @@
+# Atlantis DeepSea — 4 MB flash, single-app (no OTA)
+# Pinned so NVS always stays at 0x9000 across all firmware versions.
+# Never change NVS offset/size or the stored seed will be wiped.
+#
+# Name,   Type, SubType,  Offset,   Size
+nvs,      data, nvs,      0x9000,   0x5000
+otadata,  data, ota,      0xe000,   0x2000
+app0,     app,  ota_0,    0x10000,  0x3F0000
