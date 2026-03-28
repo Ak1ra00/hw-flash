@@ -6,35 +6,24 @@
 #include <string.h>
 #include <Arduino.h>
 
-// NVS keys — only 4 entries now; no phash to fail verification
+// NVS keys
 #define KEY_SETUP   "setup"   // uint8  — 0x01 when configured (written LAST)
 #define KEY_WC      "wc"      // uint8  — word count (12 or 24)
 #define KEY_CIV     "civ"     // blob 16 — AES-CBC IV
-#define KEY_CDATA   "cdata"   // blob 80 — AES256-CBC(ckey, iv, master_key||master_chain)
+#define KEY_CDATA   "cdata"   // blob 80 — AES256-CBC(AES_KEY, iv, master_key||master_chain)
 
-// Fixed salt for cipher key derivation.  Device-specific key comes from
-// hw_pin(); this salt makes the derived key format-specific.
-// Never change this value — it would invalidate all stored seeds.
-static const uint8_t CIPHER_SALT[16] = {
-    0xA7, 0x3D, 0x5C, 0x82, 0x1F, 0xE4, 0x09, 0xB6,
-    0x7E, 0x2A, 0xC1, 0x58, 0xD3, 0x4F, 0x96, 0x0E
+// Static AES-256 key embedded in firmware.
+// No PBKDF2, no hw_pin, no variable derivation — guarantees deterministic
+// encrypt/decrypt across every boot and every firmware flash.
+static const uint8_t AES_KEY[32] = {
+    0x4A, 0x3B, 0x7C, 0x91, 0xDE, 0x25, 0x6F, 0x08,
+    0xB3, 0x5E, 0xA1, 0x74, 0x2D, 0xC8, 0x9F, 0x1B,
+    0x62, 0x48, 0xE7, 0x3A, 0x0D, 0x95, 0x57, 0xF2,
+    0x81, 0x4C, 0xB6, 0x29, 0xD3, 0x6E, 0xAA, 0x5C
 };
 
 static bool nvs_open_rw(nvs_handle_t* h) {
     return nvs_open(NVS_NAMESPACE, NVS_READWRITE, h) == ESP_OK;
-}
-
-static void hw_pin(char pin[20]) {
-    uint64_t mac = ESP.getEfuseMac();
-    snprintf(pin, 20, "%016llX", (unsigned long long)mac);
-}
-
-// Derive the AES cipher key deterministically from the device eFuse MAC.
-// Same device → same key every time.  No random salt, no stored comparison.
-static void derive_ckey(uint8_t ckey[32]) {
-    char pin[20];
-    hw_pin(pin);
-    pin_to_key(pin, CIPHER_SALT, ckey);
 }
 
 void storage_init() {
@@ -56,28 +45,25 @@ bool storage_is_setup() {
 
 bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
                   uint8_t word_count) {
-    uint8_t ckey[32], civ[16], plain[64], cipher[80];
+    uint8_t civ[16], plain[64], cipher[80];
 
-    derive_ckey(ckey);
     crypto_rand(civ, 16);
-
     memcpy(plain,      master_key,   32);
     memcpy(plain + 32, master_chain, 32);
-    size_t clen = aes256_encrypt(ckey, civ, plain, 64, cipher);
+    size_t clen = aes256_encrypt(AES_KEY, civ, plain, 64, cipher);
     memset(plain, 0, 64);
-    memset(ckey,  0, 32);
 
     if (clen == 0) return false;
 
     nvs_handle_t h;
     if (!nvs_open_rw(&h)) return false;
 
-    // Erase any stale data (old format entries, partial writes, etc.)
+    // Erase stale data first — clean slate before every save
     nvs_erase_all(h);
     nvs_commit(h);
 
-    // Write data blobs first; KEY_SETUP written LAST so storage_is_setup()
-    // is only true when all entries are present and committed.
+    // Write data first; KEY_SETUP last — so storage_is_setup() is only
+    // true when all entries are present and committed.
     bool ok = true;
     ok = ok && (nvs_set_u8  (h, KEY_WC,    word_count)   == ESP_OK);
     ok = ok && (nvs_set_blob(h, KEY_CIV,   civ,   16)    == ESP_OK);
@@ -111,10 +97,7 @@ bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]) {
 
     if (!ok) return false;
 
-    uint8_t ckey[32];
-    derive_ckey(ckey);
-    size_t plen = aes256_decrypt(ckey, civ, cipher, sz, plain);
-    memset(ckey, 0, 32);
+    size_t plen = aes256_decrypt(AES_KEY, civ, cipher, sz, plain);
 
     if (plen != 64) {
         memset(plain, 0, sizeof(plain));
