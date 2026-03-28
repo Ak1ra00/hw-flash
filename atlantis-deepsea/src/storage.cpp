@@ -6,26 +6,35 @@
 #include <string.h>
 #include <Arduino.h>
 
-// NVS keys
-#define KEY_SETUP   "setup"     // uint8  — 0x01 when configured
-#define KEY_WC      "wc"        // uint8  — word count (12 or 24)
-#define KEY_PSALT   "psalt"     // blob 16 — PIN PBKDF2 salt
-#define KEY_PHASH   "phash"     // blob 32 — PIN key hash (verify without decrypt)
-#define KEY_CSALT   "csalt"     // blob 16 — cipher key derivation salt
-#define KEY_CIV     "civ"       // blob 16 — AES-CBC IV
-#define KEY_CDATA   "cdata"     // blob 80 — encrypted (master_key || master_chain)
+// NVS keys — only 4 entries now; no phash to fail verification
+#define KEY_SETUP   "setup"   // uint8  — 0x01 when configured (written LAST)
+#define KEY_WC      "wc"      // uint8  — word count (12 or 24)
+#define KEY_CIV     "civ"     // blob 16 — AES-CBC IV
+#define KEY_CDATA   "cdata"   // blob 80 — AES256-CBC(ckey, iv, master_key||master_chain)
 
-// Always open a fresh handle — never cache; BLE stack may reinitialise NVS
-// between calls, so a stale handle would silently return ESP_ERR_NVS_INVALID_HANDLE.
+// Fixed salt for cipher key derivation.  Device-specific key comes from
+// hw_pin(); this salt makes the derived key format-specific.
+// Never change this value — it would invalidate all stored seeds.
+static const uint8_t CIPHER_SALT[16] = {
+    0xA7, 0x3D, 0x5C, 0x82, 0x1F, 0xE4, 0x09, 0xB6,
+    0x7E, 0x2A, 0xC1, 0x58, 0xD3, 0x4F, 0x96, 0x0E
+};
+
 static bool nvs_open_rw(nvs_handle_t* h) {
     return nvs_open(NVS_NAMESPACE, NVS_READWRITE, h) == ESP_OK;
 }
 
-// Derive a hardware-bound PIN from the ESP32 eFuse MAC address.
-// This ties storage encryption to the specific device hardware.
 static void hw_pin(char pin[20]) {
     uint64_t mac = ESP.getEfuseMac();
     snprintf(pin, 20, "%016llX", (unsigned long long)mac);
+}
+
+// Derive the AES cipher key deterministically from the device eFuse MAC.
+// Same device → same key every time.  No random salt, no stored comparison.
+static void derive_ckey(uint8_t ckey[32]) {
+    char pin[20];
+    hw_pin(pin);
+    pin_to_key(pin, CIPHER_SALT, ckey);
 }
 
 void storage_init() {
@@ -47,25 +56,11 @@ bool storage_is_setup() {
 
 bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
                   uint8_t word_count) {
-    char pin[20];
-    hw_pin(pin);
+    uint8_t ckey[32], civ[16], plain[64], cipher[80];
 
-    // Random salts + IV
-    uint8_t psalt[16], csalt[16], civ[16];
-    crypto_rand(psalt, 16);
-    crypto_rand(csalt, 16);
-    crypto_rand(civ,   16);
+    derive_ckey(ckey);
+    crypto_rand(civ, 16);
 
-    // PIN verification hash
-    uint8_t phash[32];
-    pin_to_key(pin, psalt, phash);
-
-    // Cipher key (different salt from PIN hash)
-    uint8_t ckey[32];
-    pin_to_key(pin, csalt, ckey);
-
-    // Encrypt master_key || master_chain  (64 bytes → 80 bytes with PKCS7)
-    uint8_t plain[64], cipher[80];
     memcpy(plain,      master_key,   32);
     memcpy(plain + 32, master_chain, 32);
     size_t clen = aes256_encrypt(ckey, civ, plain, 64, cipher);
@@ -77,72 +72,47 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
     nvs_handle_t h;
     if (!nvs_open_rw(&h)) return false;
 
-    // Erase any previous entries so no stale/partial data remains
+    // Erase any stale data (old format entries, partial writes, etc.)
     nvs_erase_all(h);
     nvs_commit(h);
 
-    // Write all blobs first; KEY_SETUP is written LAST so that
-    // storage_is_setup() is only true when every entry is present.
+    // Write data blobs first; KEY_SETUP written LAST so storage_is_setup()
+    // is only true when all entries are present and committed.
     bool ok = true;
-    ok = ok && (nvs_set_u8  (h, KEY_WC,    word_count)    == ESP_OK);
-    ok = ok && (nvs_set_blob(h, KEY_PSALT, psalt, 16)     == ESP_OK);
-    ok = ok && (nvs_set_blob(h, KEY_PHASH, phash, 32)     == ESP_OK);
-    ok = ok && (nvs_set_blob(h, KEY_CSALT, csalt, 16)     == ESP_OK);
-    ok = ok && (nvs_set_blob(h, KEY_CIV,   civ,   16)     == ESP_OK);
-    ok = ok && (nvs_set_blob(h, KEY_CDATA, cipher, clen)  == ESP_OK);
-
-    if (ok) ok = (nvs_set_u8(h, KEY_SETUP, 0x01) == ESP_OK);
+    ok = ok && (nvs_set_u8  (h, KEY_WC,    word_count)   == ESP_OK);
+    ok = ok && (nvs_set_blob(h, KEY_CIV,   civ,   16)    == ESP_OK);
+    ok = ok && (nvs_set_blob(h, KEY_CDATA, cipher, clen) == ESP_OK);
+    if (ok) ok = (nvs_set_u8(h, KEY_SETUP, 0x01)         == ESP_OK);
 
     if (ok) {
         nvs_commit(h);
     } else {
-        // Partial write — leave NVS clean so storage_is_setup() stays false
         nvs_erase_all(h);
         nvs_commit(h);
     }
 
     nvs_close(h);
-    memset(phash, 0, 32);
-    memset(civ,   0, 16);
+    memset(civ, 0, 16);
     return ok;
 }
 
 bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]) {
-    char pin[20];
-    hw_pin(pin);
-
     nvs_handle_t h;
     if (!nvs_open_rw(&h)) return false;
 
-    uint8_t psalt[16], phash_stored[32], phash_calc[32];
-    size_t sz = 16;
-    bool read_ok = (nvs_get_blob(h, KEY_PSALT, psalt, &sz) == ESP_OK);
-    sz = 32;
-    read_ok = read_ok && (nvs_get_blob(h, KEY_PHASH, phash_stored, &sz) == ESP_OK);
+    uint8_t civ[16], cipher[80], plain[80];
+    size_t sz;
 
-    if (!read_ok) {
-        nvs_close(h);
-        return false;
-    }
-
-    pin_to_key(pin, psalt, phash_calc);
-    bool ok = (memcmp(phash_calc, phash_stored, 32) == 0);
-    memset(phash_calc, 0, 32);
-
-    if (!ok) {
-        nvs_close(h);
-        return false;
-    }
-
-    // Decrypt master key
-    uint8_t csalt[16], civ[16], cipher[80], plain[80];
-    sz = 16; nvs_get_blob(h, KEY_CSALT, csalt,  &sz);
-    sz = 16; nvs_get_blob(h, KEY_CIV,   civ,    &sz);
-    sz = 80; nvs_get_blob(h, KEY_CDATA, cipher, &sz);
+    sz = sizeof(civ);
+    bool ok = (nvs_get_blob(h, KEY_CIV,   civ,    &sz) == ESP_OK);
+    sz = sizeof(cipher);
+    ok = ok && (nvs_get_blob(h, KEY_CDATA, cipher, &sz) == ESP_OK);
     nvs_close(h);
 
+    if (!ok) return false;
+
     uint8_t ckey[32];
-    pin_to_key(pin, csalt, ckey);
+    derive_ckey(ckey);
     size_t plen = aes256_decrypt(ckey, civ, cipher, sz, plain);
     memset(ckey, 0, 32);
 
