@@ -27,14 +27,37 @@ def banner():
 
 
 def find_device():
-    """Return (port, description) for the first CP210x device found."""
+    """Return (port, description) for the first likely ESP32 device found."""
     try:
         from serial.tools.list_ports import comports
-        for p in comports():
+        ports = list(comports())
+
+        # First pass: look for known ESP32 USB-serial chips
+        known_ids = [
+            'CP210',        # Silicon Labs CP210x (LilyGO default)
+            '10C4:EA60',    # CP210x USB VID:PID
+            'CH340',        # WCH CH340
+            'CH9102',       # WCH CH9102
+            '1A86:7523',    # CH340 USB VID:PID
+            '1A86:55D4',    # CH9102 USB VID:PID
+            'FTDI',         # FTDI chips
+            '0403:6001',    # FTDI FT232 VID:PID
+            'USB-SERIAL',   # Generic USB serial
+            'USB SERIAL',
+        ]
+        for p in ports:
             desc = (p.description or '').upper()
             hwid = (p.hwid or '').upper()
-            if 'CP210' in desc or '10C4:EA60' in hwid:
+            for tag in known_ids:
+                if tag in desc or tag in hwid:
+                    return p.device, p.description
+
+        # Second pass: any COM port that isn't built-in (has a real hwid)
+        for p in ports:
+            hwid = (p.hwid or '')
+            if hwid and hwid != 'n/a':
                 return p.device, p.description
+
     except Exception:
         pass
     return None, None
@@ -70,6 +93,23 @@ def main():
     if not port:
         print()
         print("[!] T-Display not found.")
+        print()
+        # Show what ports ARE visible, to help debug
+        try:
+            from serial.tools.list_ports import comports
+            visible = list(comports())
+            if visible:
+                print("    Detected serial ports:")
+                for p in visible:
+                    print(f"      {p.device:8s}  {p.description}  [{p.hwid}]")
+                print()
+                print("    If your device is listed above, it may use a")
+                print("    different USB chip. Please report this at:")
+                print("    https://github.com/ak1ra00/hw-flash/issues")
+            else:
+                print("    No serial ports detected at all.")
+        except Exception:
+            pass
         print()
         print("    Checklist:")
         print("      1. Plug in your T-Display via USB-C")
