@@ -79,3 +79,7 @@ SettingsItem ui_settings_menu();
 
 // ── Bluetooth settings screen ─────────────────────────────────────────────────
 void ui_ble_settings();
+
+// ── Serial provisioning screen ────────────────────────────────────────────────
+// Non-blocking: draws "Waiting for PC..." screen once. Caller polls buttons.
+void ui_show_provisioning();

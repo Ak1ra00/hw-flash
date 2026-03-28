@@ -26,6 +26,96 @@ static bool           key_loaded     = false;
 static char           seed_words[24][10];
 static int            word_count     = 12;
 
+// ── Serial provisioning ───────────────────────────────────────────────────────
+
+static bool hex_to_bytes(const char* hex, uint8_t* out, int len) {
+    for (int i = 0; i < len; i++) {
+        char h[3] = {hex[i*2], hex[i*2+1], '\0'};
+        if (!isxdigit((uint8_t)h[0]) || !isxdigit((uint8_t)h[1])) return false;
+        out[i] = (uint8_t)strtol(h, nullptr, 16);
+    }
+    return true;
+}
+
+// Listens on Serial for a PROVISION packet from the flasher.
+// Broadcasts ATLANTIS_READY every 2 s so the PC can connect at any time.
+// Either button skips to on-device manual entry.
+// Returns true if keys were received, saved, and loaded into RAM.
+static bool try_serial_provision() {
+    ui_show_provisioning();
+
+    char    buf[200];
+    int     buf_len   = 0;
+    uint32_t start    = millis();
+    uint32_t last_rdy = 0;
+
+    while (millis() - start < 60000UL) {
+        btns_poll();
+        if (btn1_short() || btn2_short() || btns_both()) return false;
+
+        // Announce readiness every 2 s so PC can connect even if it opens
+        // the port after the first broadcast.
+        if (millis() - last_rdy >= 2000UL) {
+            Serial.println("ATLANTIS_READY");
+            last_rdy = millis();
+        }
+
+        while (Serial.available()) {
+            char c = Serial.read();
+            if (c == '\n' || c == '\r') {
+                if (buf_len > 0) {
+                    buf[buf_len] = '\0';
+                    // Expected: PROVISION:<64hex_key>:<64hex_chain>:<wc>
+                    if (strncmp(buf, "PROVISION:", 10) == 0 &&
+                        buf_len >= 10 + 64 + 1 + 64 + 1 + 2) {
+                        const char* p = buf + 10;
+                        uint8_t key[32] = {0}, chain[32] = {0};
+                        bool ok = false;
+                        int  wc = 0;
+
+                        if (hex_to_bytes(p, key, 32)) {
+                            p += 64;
+                            if (*p == ':') {
+                                p++;
+                                if (hex_to_bytes(p, chain, 32)) {
+                                    p += 64;
+                                    if (*p == ':') {
+                                        wc = atoi(p + 1);
+                                        ok = (wc == 12 || wc == 24);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (ok && storage_save(key, chain, (uint8_t)wc)) {
+                            memcpy(master_key,   key,   32);
+                            memcpy(master_chain, chain, 32);
+                            key_loaded = true;
+                            memset(key,   0, 32);
+                            memset(chain, 0, 32);
+                            Serial.println("PROVISION_OK");
+                            delay(100);
+                            ui_message("Seed Saved!",
+                                       "Device ready.\nYou can unplug\nthe USB now.", 3000);
+                            state = STATE_MAIN_MENU;
+                            return true;
+                        }
+
+                        Serial.println("PROVISION_ERR");
+                        memset(key,   0, 32);
+                        memset(chain, 0, 32);
+                    }
+                    buf_len = 0;
+                }
+            } else if (buf_len < (int)sizeof(buf) - 1) {
+                buf[buf_len++] = c;
+            }
+        }
+        delay(10);
+    }
+    return false;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 static void clear_keys() {
     memset(master_key,   0, 32);
@@ -146,7 +236,10 @@ void loop() {
                 run_setup();
             }
         } else {
-            run_setup();
+            // Try PC provisioning first (60 s window); fall back to on-device
+            if (!try_serial_provision()) {
+                run_setup();
+            }
         }
         break;
 

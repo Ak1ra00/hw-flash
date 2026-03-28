@@ -953,6 +953,20 @@ void ui_ble_settings() {
     }
 }
 
+// ── Serial provisioning screen ────────────────────────────────────────────────
+void ui_show_provisioning() {
+    tft.fillScreen(C_BG);
+    draw_header("SETUP");
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(C_ACCENT, C_BG);
+    tft.drawString("Waiting for PC...", DISP_W/2, 50, 2);
+    tft.setTextColor(C_DIM, C_BG);
+    tft.drawString("Run the flasher app", DISP_W/2, 80, 1);
+    tft.drawString("or press any button", DISP_W/2, 92, 1);
+    tft.drawString("to enter seed here.", DISP_W/2, 104, 1);
+    draw_footer("skip", "skip");
+}
+
 // ── Wipe confirm ──────────────────────────────────────────────────────────────
 void ui_confirm_wipe() {
     // Shown from Settings — not yet wired; placeholder
