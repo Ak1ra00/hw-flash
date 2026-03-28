@@ -567,15 +567,11 @@ MenuItem ui_main_menu() {
     auto draw = [&]() {
         tft.fillScreen(C_BG);
 
-        // Title bar with BLE connection status
+        // Title bar
         tft.fillRect(0, 0, DISP_W, 20, C_BOX);
         tft.setTextDatum(ML_DATUM);
         tft.setTextColor(C_TITLE, C_BOX);
         tft.drawString("ATLANTIS  DEEPSEA", 8, 10, 1);
-        tft.setTextDatum(MR_DATUM);
-        bool conn = ble_connected();
-        tft.setTextColor(conn ? C_GOOD : C_DIM, C_BOX);
-        tft.drawString(conn ? "BLE" : "no BLE", DISP_W - 8, 10, 1);
         draw_divider(20);
 
         for (int i = 0; i < MENU_COUNT; i++) {
@@ -599,15 +595,6 @@ MenuItem ui_main_menu() {
     draw();
     while (true) {
         btns_poll();
-
-        // Handle BLE passkey pairing request
-        uint32_t pk = ble_passkey_pending();
-        if (pk) {
-            ble_passkey_clear();
-            ui_show_passkey(pk);
-            draw();
-        }
-
         if (btn1_short()) { sel = (sel + 1) % MENU_COUNT; draw(); }
         if (btn2_short()) { sel = (sel - 1 + MENU_COUNT) % MENU_COUNT; draw(); }
         if (btns_both())   return (MenuItem)sel;
@@ -704,6 +691,10 @@ void ui_show_passkey(uint32_t code) {
 
 // ── Password display ──────────────────────────────────────────────────────────
 void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
+    // BLE is only active while the password is on screen.
+    // Disabling on exit restores the host's on-screen keyboard.
+    ble_enable();
+
     auto redraw_screen = [&]() {
         tft.fillScreen(C_BG);
         draw_header("Password");
@@ -782,6 +773,9 @@ void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
 
         delay(10);
     }
+
+    // Stop advertising and disconnect — host's soft keyboard is restored.
+    ble_disable();
 
     tft.fillScreen(C_BG);
     tft.setTextColor(C_DIM, C_BG);
