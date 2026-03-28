@@ -14,9 +14,9 @@
 #define LONG_PRESS_MS   700
 
 // ── Security ─────────────────────────────────────────────────────────────────
-#define PIN_LENGTH        6
+#define PIN_LENGTH        3        // 3-emoji combo
 #define PIN_MAX_ATTEMPTS  5
-#define PIN_LOCKOUT_MS   30000UL   // 30 s lockout after 5 wrong tries
+#define PIN_LOCKOUT_MS   30000UL   // retained for API compat (wipe replaces lockout)
 #define AUTO_LOCK_MS    120000UL   // 2 min idle → lock
 
 // ── Password derivation ───────────────────────────────────────────────────────

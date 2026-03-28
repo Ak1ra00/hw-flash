@@ -87,20 +87,20 @@ static void run_setup() {
     bip32_master(seed, 64, master_key, master_chain);
     memset(seed, 0, 64);
 
-    // 6. Set PIN
-    ui_message("Set PIN", "Choose a 6-digit PIN\nto protect this device.", 2000);
+    // 6. Set secret combo (3 emoji symbols)
+    ui_message("Set Combo", "Pick 3 emoji symbols\nas your secret combo.", 2000);
     char pin[7] = {0};
     char pin2[7] = {0};
     bool pin_ok = false;
     while (!pin_ok) {
         ui_pin_entry(pin,  false, PIN_MAX_ATTEMPTS, false, 0);
-        ui_message("Confirm PIN", "Re-enter your PIN.", 1200);
+        ui_message("Confirm Combo", "Re-enter your combo.", 1200);
         ui_pin_entry(pin2, false, PIN_MAX_ATTEMPTS, false, 0);
         if (strcmp(pin, pin2) == 0) {
             pin_ok = true;
         } else {
             memset(pin, 0, 7); memset(pin2, 0, 7);
-            ui_message("Mismatch", "PINs didn't match.\nTry again.", 1500);
+            ui_message("Mismatch", "Combos didn't match.\nTry again.", 1500);
         }
     }
 
@@ -146,7 +146,7 @@ static void run_pin_entry() {
         if (attempts_left == 0) {
             // Security wipe — erase seed and all data, restart as new device
             ui_message("SECURITY WIPE",
-                       "5 wrong PINs.\nErasing all data...", 3000);
+                       "5 wrong combos.\nErasing all data...", 3000);
             storage_wipe();
             ESP.restart();
         }

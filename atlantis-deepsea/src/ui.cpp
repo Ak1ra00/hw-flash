@@ -189,129 +189,117 @@ void ui_boot() {
     tft.fillScreen(C_BG);
 }
 
-// ── PIN entry ─────────────────────────────────────────────────────────────────
-bool ui_pin_entry(char pin_out[7], bool wrong, int attempts_left, bool locked_out, uint32_t lockout_ms) {
-    const int N = PIN_LENGTH;
-    int  digits[N] = {0};
-    int  pos = 0;            // current digit position (0-5)
-    bool done = false;
+// ── Emoji combo authentication ────────────────────────────────────────────────
+// 10 symbols: each is a printable ASCII char drawn large in a unique colour.
+// The secret combo is 3 symbols (10^3 = 1000 combos), wiped after 5 failures.
 
-    auto draw_pin_screen = [&]() {
-        tft.fillScreen(C_BG);
+static const char  EMOJI_SYM[10]  = {'~','@','*','X','#','+','^','$','%','!'};
+static const char* EMOJI_NAME[10] = {
+    "WAVE","VORTEX","STAR","CROSS","GRID",
+    "PLUS","BOLT","COIN","BUBBL","FLAME"
+};
 
-        // Header
+static uint16_t emoji_fg(int id) {
+    switch (id) {
+        case 0: return tft.color565(  0, 180, 255);  // blue
+        case 1: return tft.color565(  0, 220, 190);  // teal
+        case 2: return tft.color565(255, 220,   0);  // yellow
+        case 3: return tft.color565(  0, 255, 220);  // cyan
+        case 4: return tft.color565(255, 120,   0);  // orange
+        case 5: return tft.color565(255, 200,  50);  // gold
+        case 6: return tft.color565(100, 255,   0);  // lime
+        case 7: return tft.color565(255,  50, 200);  // magenta
+        case 8: return tft.color565(255, 150, 200);  // pink
+        default:return tft.color565(255,  60,  60);  // red
+    }
+}
+
+bool ui_pin_entry(char pin_out[7], bool wrong, int attempts_left,
+                  bool /*locked_out*/, uint32_t /*lockout_ms*/) {
+    const int N     = 3;    // 3-symbol combo
+    const int BOX_W = 62, BOX_H = 52, GAP = 8;
+    const int BOX_Y = 26;
+    const int START_X = (DISP_W - (N * BOX_W + (N - 1) * GAP)) / 2;
+
+    int combo[N]  = {0, 0, 0};
+    int active    = 0;
+
+    // x-centre of slot i
+    auto cx = [&](int i) { return START_X + i * (BOX_W + GAP) + BOX_W / 2; };
+    auto bx = [&](int i) { return START_X + i * (BOX_W + GAP); };
+
+    auto draw_slot = [&](int i) {
+        int eid = combo[i];
+        bool is_active = (i == active);
+        bool is_locked = (i < active);
+
+        uint16_t bg = is_active ? tft.color565(0, 35, 55)
+                    : is_locked ? tft.color565(0, 28,  0)
+                    :             C_BOX;
+        uint16_t border = is_active ? C_PIN
+                        : is_locked ? C_GOOD
+                        :             C_DIM;
+
+        tft.fillRoundRect(bx(i), BOX_Y, BOX_W, BOX_H, 6, bg);
+        tft.drawRoundRect(bx(i), BOX_Y, BOX_W, BOX_H, 6, border);
+        if (is_active)  // double border on active slot
+            tft.drawRoundRect(bx(i)+1, BOX_Y+1, BOX_W-2, BOX_H-2, 5, border);
+
+        char sym[2] = {EMOJI_SYM[eid], 0};
         tft.setTextDatum(MC_DATUM);
-        tft.setTextColor(C_TITLE, C_BG);
-        tft.drawString("ATLANTIS  DEEPSEA", DISP_W/2, 14, 1);
-        draw_divider(24);
+        uint16_t fg = (is_active || is_locked) ? emoji_fg(eid) : C_DIM;
+        tft.setTextColor(fg, bg);
+        tft.drawString(sym, cx(i), BOX_Y + BOX_H / 2, 4);
 
-        if (locked_out) {
-            tft.setTextColor(C_WARN, C_BG);
-            tft.drawString("LOCKED OUT", DISP_W/2, 52, 2);
-            char buf[40];
-            snprintf(buf, sizeof(buf), "Try again in %lus", (unsigned long)(lockout_ms/1000));
-            tft.setTextColor(C_DIM, C_BG);
-            tft.drawString(buf, DISP_W/2, 75, 1);
-            return;
-        }
-
-        // Label
-        tft.setTextColor(C_TEXT, C_BG);
-        tft.drawString(wrong ? "Wrong PIN" : "Enter PIN", DISP_W/2, 40, 2);
-        if (wrong) {
-            char buf[24];
-            snprintf(buf, sizeof(buf), "%d attempts left", attempts_left);
-            tft.setTextColor(C_WARN, C_BG);
-            tft.drawString(buf, DISP_W/2, 57, 1);
-        }
-
-        // 6 digit boxes
-        int box_w = 26, box_h = 30, gap = 6;
-        int total_w = N * box_w + (N - 1) * gap;
-        int start_x = (DISP_W - total_w) / 2;
-        int box_y = wrong ? 67 : 58;
-
-        for (int i = 0; i < N; i++) {
-            int bx = start_x + i * (box_w + gap);
-            uint16_t border_col = (i == pos) ? C_PIN : C_BORDER;
-            uint16_t fill_col   = (i == pos) ? tft.color565(40, 25, 0) : C_BOX;
-            tft.fillRoundRect(bx, box_y, box_w, box_h, 4, fill_col);
-            tft.drawRoundRect(bx, box_y, box_w, box_h, 4, border_col);
-
-            tft.setTextDatum(MC_DATUM);
-            if (i < pos) {
-                // confirmed digits: show dot
-                tft.setTextColor(C_ACCENT, fill_col);
-                tft.drawString("*", bx + box_w/2, box_y + box_h/2, 2);
-            } else if (i == pos) {
-                // current digit: show number
-                char d[2] = {(char)('0' + digits[i]), 0};
-                tft.setTextColor(C_PIN, fill_col);
-                tft.drawString(d, bx + box_w/2, box_y + box_h/2, 2);
-            } else {
-                // future digits: empty
-                tft.setTextColor(C_DIM, fill_col);
-                tft.drawString("-", bx + box_w/2, box_y + box_h/2, 2);
-            }
-        }
-
-        draw_footer("1:up  2:down", "BOTH: confirm digit");
+        // label below each slot
+        tft.setTextColor(is_active ? C_ACCENT : (is_locked ? C_GOOD : C_DIM), C_BG);
+        tft.drawString(EMOJI_NAME[eid], cx(i), BOX_Y + BOX_H + 8, 1);
     };
 
-    draw_pin_screen();
+    auto draw = [&]() {
+        tft.fillScreen(C_BG);
 
-    uint32_t last_activity = millis();
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextColor(C_TITLE, C_BG);
+        tft.drawString("ATLANTIS  DEEPSEA", DISP_W/2, 12, 1);
+        draw_divider(22);
 
-    while (!done) {
+        for (int i = 0; i < N; i++) draw_slot(i);
+
+        // Wrong combo notice
+        if (wrong) {
+            char buf[36];
+            snprintf(buf, sizeof(buf), "Wrong combo!  %d attempt%s left",
+                     attempts_left, attempts_left == 1 ? "" : "s");
+            tft.setTextColor(C_WARN, C_BG);
+            tft.drawString(buf, DISP_W/2, 104, 1);
+        }
+
+        draw_footer("1:next  2:prev", "BOTH: confirm slot");
+    };
+
+    draw();
+
+    while (true) {
         btns_poll();
 
-        if (locked_out) {
-            uint32_t elapsed = millis() - last_activity;
-            if (elapsed > 1000) {
-                last_activity = millis();
-                if (lockout_ms > 1000) lockout_ms -= 1000; else lockout_ms = 0;
-                draw_pin_screen();
-                if (lockout_ms == 0) { locked_out = false; draw_pin_screen(); }
-            }
-            delay(10);
-            continue;
-        }
+        if (btn1_short()) { combo[active] = (combo[active] + 1) % 10;     draw(); }
+        if (btn2_short()) { combo[active] = (combo[active] + 9) % 10;     draw(); }
 
-        // BTN1 short → digit up
-        if (btn1_short()) {
-            digits[pos] = (digits[pos] + 1) % 10;
-            draw_pin_screen();
-        }
+        if (btn1_long() && active > 0) { active--; draw(); }  // back
 
-        // BTN2 short → digit down
-        if (btn2_short()) {
-            digits[pos] = (digits[pos] + 9) % 10;   // +9 mod 10 = -1
-            draw_pin_screen();
-        }
-
-        // BOTH → confirm digit, advance position
         if (btns_both()) {
-            pos++;
-            if (pos >= N) {
-                for (int i = 0; i < N; i++) pin_out[i] = '0' + digits[i];
+            active++;
+            if (active >= N) {
+                for (int i = 0; i < N; i++) pin_out[i] = '0' + combo[i];
                 pin_out[N] = '\0';
-                done = true;
-            } else {
-                draw_pin_screen();
+                return true;
             }
-        }
-
-        // BTN1 long → back one digit
-        if (btn1_long() && pos > 0) {
-            pos--;
-            digits[pos] = 0;
-            draw_pin_screen();
+            draw();
         }
 
         delay(8);
     }
-
-    return true;
 }
 
 // ── Choose word count ─────────────────────────────────────────────────────────
