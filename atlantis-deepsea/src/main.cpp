@@ -132,13 +132,8 @@ static void run_pin_entry() {
     int  attempts_left = storage_attempts_left();
 
     while (true) {
-        bool locked_out   = storage_is_locked_out();
-        uint32_t lock_rem = locked_out ? PIN_LOCKOUT_MS : 0;
-
         char pin[7] = {0};
-        ui_pin_entry(pin, wrong, attempts_left, locked_out, lock_rem);
-
-        if (locked_out) { delay(500); continue; }
+        ui_pin_entry(pin, wrong, attempts_left, false, 0);
 
         if (storage_load(pin, master_key, master_chain)) {
             memset(pin, 0, 7);
@@ -153,8 +148,11 @@ static void run_pin_entry() {
         attempts_left = storage_attempts_left();
 
         if (attempts_left == 0) {
-            ui_message("Locked Out",
-                       "Too many wrong PINs.\nWaiting 30 seconds.", 2000);
+            // Security wipe — erase seed and all data, restart as new device
+            ui_message("SECURITY WIPE",
+                       "5 wrong PINs.\nErasing all data...", 3000);
+            storage_wipe();
+            ESP.restart();
         }
     }
 }
