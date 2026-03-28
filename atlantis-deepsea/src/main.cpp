@@ -120,8 +120,8 @@ static void run_settings() {
 void setup() {
     Serial.begin(115200);
     ui_init();
-    ble_init();       // BLE must init first — it calls nvs_flash_init internally
-    storage_init();
+    storage_init();   // Init NVS first — if BLE sees it already initialized
+    ble_init();       // it gets INVALID_STATE and skips nvs_flash_erase()
     state = STATE_BOOT;
 }
 
@@ -134,12 +134,14 @@ void loop() {
         ui_boot();
         if (storage_is_setup()) {
             // Load keys directly — no PIN required
-            if (!storage_load(master_key, master_chain)) {
-                ui_message("Error", "Failed to load seed.\nRe-enter your seed.", 3000);
-                storage_wipe();
-                run_setup();
-            } else {
+            if (storage_load(master_key, master_chain)) {
                 key_loaded = true;
+                state = STATE_MAIN_MENU;
+            } else {
+                // Load failed — show error but do NOT wipe.
+                // User can factory-reset via Settings if needed.
+                ui_message("Load Error",
+                           "Cannot read seed.\nUse Settings > Factory\nReset to reconfigure.", 0);
                 state = STATE_MAIN_MENU;
             }
         } else {
