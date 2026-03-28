@@ -21,7 +21,7 @@ def banner():
     print("  |           A T L A N T I S                  |")
     print("  |             D E E P S E A                  |")
     print("  |        BIP85 Password Manager              |")
-    print("  |         Firmware Flasher  v1.0             |")
+    print("  |         Firmware Flasher  v1.2             |")
     print("  +==============================================+")
     print()
 
@@ -135,6 +135,7 @@ def main():
         '--before', 'default-reset',
         '--after',  'hard-reset',
         'write-flash',
+        '--erase-all',          # wipe entire flash (incl. NVS) on every flash
         '--flash-mode', 'dio',
         '--flash-freq', '80m',
         '--flash-size', '4MB',
@@ -158,7 +159,7 @@ def main():
         print("  |  Flash complete!                             |")
         print("  |                                              |")
         print("  |  Unplug and replug your T-Display.           |")
-        print("  |  The Atlantis DeepSea setup screen starts.   |")
+        print("  |  All data wiped — setup screen will start.   |")
         print("  +----------------------------------------------+")
         wait_and_exit(0)
     else:
