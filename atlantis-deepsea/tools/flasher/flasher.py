@@ -158,7 +158,7 @@ def main():
         print("  |  Flash complete!                             |")
         print("  |                                              |")
         print("  |  Unplug and replug your T-Display.           |")
-        print("  |  All data wiped — setup screen will start.   |")
+        print("  |  Your seed is preserved — no data wiped.     |")
         print("  +----------------------------------------------+")
         wait_and_exit(0)
     else:
