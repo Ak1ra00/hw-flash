@@ -16,7 +16,7 @@ Same seed + same index = same password, every time. No cloud, no sync, no server
 ## Flash the firmware
 
 ### Windows — two clicks
-1. Download **`AtlantisDeepSea-Flasher.exe`** from the [latest release](../../releases/latest)
+1. Download **`AtlantisDeepSea-Flasher.exe`** from the [latest release](https://github.com/Ak1ra00/hw-flash/releases/latest)
 2. Enter bootloader mode: hold **BOOT**, replug USB, release **BOOT**
 3. Double-click the .exe — it auto-detects the device and flashes
 
