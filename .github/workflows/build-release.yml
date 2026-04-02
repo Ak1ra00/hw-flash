@@ -90,7 +90,7 @@ jobs:
         ls -la flasher-workspace/
 
     - name: Install Python dependencies
-      run: pip install pyinstaller esptool pyserial
+      run: pip install pyinstaller esptool pyserial mnemonic
 
     - name: Build single-file .exe with PyInstaller
       working-directory: flasher-workspace
@@ -101,6 +101,7 @@ jobs:
           --console \
           --name "AtlantisDeepSea-Flasher" \
           --collect-data esptool \
+          --collect-data mnemonic \
           --add-data "bootloader.bin;." \
           --add-data "partitions.bin;." \
           --add-data "boot_app0.bin;." \

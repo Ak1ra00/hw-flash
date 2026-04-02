@@ -70,27 +70,139 @@ def wait_and_exit(code=0):
     sys.exit(code)
 
 
+# ── Seed generation helpers ────────────────────────────────────────────────────
+
+def generate_mnemonic(word_count):
+    """Generate a cryptographically secure BIP39 mnemonic."""
+    from mnemonic import Mnemonic
+    mnemo = Mnemonic("english")
+    strength = 128 if word_count == 12 else 256
+    return mnemo.generate(strength=strength)
+
+
+def display_mnemonic(mnemonic_str, word_count):
+    """Print the mnemonic in a clear numbered grid."""
+    words = mnemonic_str.split()
+    print()
+    print("  +----------------------------------------------+")
+    print("  |  YOUR SEED PHRASE — WRITE THIS DOWN NOW     |")
+    print("  |                                              |")
+    cols = 3
+    for row_start in range(0, word_count, cols):
+        line = ""
+        for i in range(cols):
+            idx = row_start + i
+            if idx < word_count:
+                entry = f"{idx+1:>2}. {words[idx]:<10}"
+                line += f"  {entry}"
+        print(f"  |{line:<46}|")
+    print("  |                                              |")
+    print("  |  KEEP THIS SAFE. Anyone with these words    |")
+    print("  |  can access ALL your passwords forever.     |")
+    print("  +----------------------------------------------+")
+    print()
+
+
+def save_seed_to_desktop(mnemonic_str, word_count):
+    """Save the seed phrase to a .txt file on the user's Desktop."""
+    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+    if not os.path.isdir(desktop):
+        # Fallback to home directory if Desktop doesn't exist
+        desktop = os.path.expanduser("~")
+
+    filepath = os.path.join(desktop, "atlantis-deepsea-seed.txt")
+    words = mnemonic_str.split()
+
+    lines = [
+        "Atlantis DeepSea — BIP39 Seed Phrase",
+        "=" * 40,
+        "",
+        f"Word count: {word_count}",
+        "",
+    ]
+    for i, word in enumerate(words, 1):
+        lines.append(f"{i:>2}. {word}")
+    lines += [
+        "",
+        "=" * 40,
+        "WARNING: Keep this file private and secure.",
+        "Anyone with these words can access all your passwords.",
+        "Delete this file after writing the words down.",
+    ]
+
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+        print(f"\n  [OK] Saved to: {filepath}")
+        return True
+    except Exception as e:
+        print(f"\n  [!] Could not save file: {e}")
+        return False
+
+
 # ── Seed provisioning helpers ──────────────────────────────────────────────────
 
 def collect_seed():
     """
-    Ask the user for their BIP39 seed phrase.
+    Ask the user for their BIP39 seed phrase, or offer to generate one.
     Returns (mnemonic_str, word_count) or None if skipped.
     """
     print()
     print("  +----------------------------------------------+")
     print("  |  PC Seed Provisioning (optional)            |")
-    print("  |                                              |")
-    print("  |  Type your seed words here and they will     |")
-    print("  |  be written to the device automatically.     |")
-    print("  |  The seed is stored permanently on device.   |")
-    print("  |  Press Enter to skip and use device buttons. |")
     print("  +----------------------------------------------+")
     print()
-    answer = input("  Provision seed from PC now? [y/N]: ").strip().lower()
-    if answer != 'y':
+    print("  [1] I already have a seed phrase")
+    print("  [2] Generate a new seed phrase for me")
+    print("  [Enter] Skip — I will enter words on the device")
+    print()
+    choice = input("  Choice [1/2/Enter]: ").strip()
+
+    if choice == '':
         return None
 
+    # ── Generate a new seed ────────────────────────────────────────────────
+    if choice == '2':
+        while True:
+            wc_str = input("\n  Word count for new seed (12 or 24): ").strip()
+            if wc_str in ('12', '24'):
+                word_count = int(wc_str)
+                break
+            print("  Please enter 12 or 24.")
+
+        print("\n  Generating secure random seed...")
+        try:
+            mnemonic_str = generate_mnemonic(word_count)
+        except ImportError:
+            print("\n  [!] The 'mnemonic' package is not available in this build.")
+            print("      Please enter your own seed phrase instead.")
+            choice = '1'  # fall through to manual entry below
+        else:
+            display_mnemonic(mnemonic_str, word_count)
+
+            print("  What would you like to do with your seed phrase?")
+            print()
+            print("  [1] Save to Desktop as atlantis-deepsea-seed.txt")
+            print("  [2] I have written it down — continue")
+            print("  [3] Both — save file AND continue")
+            print()
+            save_choice = input("  Choice [1/2/3]: ").strip()
+
+            if save_choice in ('1', '3'):
+                save_seed_to_desktop(mnemonic_str, word_count)
+                if save_choice == '1':
+                    # Give them time to save before continuing
+                    input("\n  Press Enter when ready to continue...")
+
+            if save_choice not in ('2', '3'):
+                # If they only saved (choice 1), confirm they're ready
+                pass  # already handled above
+
+            print("\n  Deriving keys from your new seed...")
+            return mnemonic_str, word_count
+
+    # ── Enter existing seed ────────────────────────────────────────────────
+    # (choice == '1', or fallback from failed generate)
     while True:
         wc_str = input("\n  Word count (12 or 24): ").strip()
         if wc_str in ('12', '24'):
