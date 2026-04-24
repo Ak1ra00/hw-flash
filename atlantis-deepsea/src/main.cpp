@@ -13,14 +13,13 @@ enum AppState {
     STATE_SEED_CONFIRM,
     STATE_MAIN_MENU,
     STATE_GET_PASSWORD,
-    STATE_SETTINGS,
-    STATE_ABOUT,
 };
 
 static AppState       state          = STATE_BOOT;
 static uint8_t        master_key[32] = {0};
 static uint8_t        master_chain[32]= {0};
 static bool           key_loaded     = false;
+static uint32_t       last_activity  = 0;
 
 // Scratch space for seed entry
 static char           seed_words[24][10];
@@ -166,6 +165,9 @@ static void run_setup() {
     bip32_master(seed, 64, master_key, master_chain);
     memset(seed, 0, 64);
 
+    // Clear seed words immediately — no longer needed
+    for (int i = 0; i < 24; i++) memset(seed_words[i], 0, 10);
+
     // 6. Save to storage (hardware-bound key, no user PIN required)
     if (!storage_save(master_key, master_chain, (uint8_t)word_count)) {
         ui_message("Error", "Failed to save.\nDevice may need reset.", 3000);
@@ -173,10 +175,8 @@ static void run_setup() {
         ESP.restart();
     }
 
-    // Clear seed words from RAM
-    for (int i = 0; i < 24; i++) memset(seed_words[i], 0, 10);
-
     key_loaded = true;
+    last_activity = millis();
 
     ui_message("Success!", "Wallet stored securely.\nEntering vault...", 2000);
     state = STATE_MAIN_MENU;
@@ -218,6 +218,15 @@ void setup() {
 void loop() {
     btns_poll();
 
+    // Auto-lock after idle timeout — clear keys and return to boot screen
+    if (key_loaded && state == STATE_MAIN_MENU &&
+        millis() - last_activity > AUTO_LOCK_MS) {
+        memset(master_key,   0, 32);
+        memset(master_chain, 0, 32);
+        key_loaded = false;
+        state = STATE_BOOT;
+    }
+
     switch (state) {
 
     case STATE_BOOT:
@@ -245,6 +254,7 @@ void loop() {
 
     case STATE_MAIN_MENU: {
         MenuItem choice = ui_main_menu();
+        last_activity = millis();
         switch (choice) {
             case MENU_GET_PASSWORD: state = STATE_GET_PASSWORD; break;
             case MENU_SETTINGS:     run_settings(); break;
@@ -283,16 +293,6 @@ void loop() {
         state = STATE_MAIN_MENU;
         break;
     }
-
-    case STATE_SETTINGS:
-        run_settings();
-        state = STATE_MAIN_MENU;
-        break;
-
-    case STATE_ABOUT:
-        ui_about();
-        state = STATE_MAIN_MENU;
-        break;
 
     default:
         state = STATE_MAIN_MENU;

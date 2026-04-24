@@ -55,8 +55,10 @@ void storage_init() {
                  "seed");
 
     if (s_part) {
+#ifdef DEBUG
         Serial.printf("[storage] seed part @ 0x%X  size 0x%X\n",
                       s_part->address, s_part->size);
+#endif
     } else {
         Serial.println("[storage] ERROR: seed partition NOT FOUND");
     }
@@ -70,15 +72,19 @@ bool storage_is_setup() {
     esp_partition_read_raw(seed_part(), 0, magic, sizeof(magic));
     bool ok = magic[0] == SEED_MAGIC_0 && magic[1] == SEED_MAGIC_1 &&
               magic[2] == SEED_MAGIC_2 && magic[3] == SEED_MAGIC_3;
+#ifdef DEBUG
     Serial.printf("[storage] is_setup: magic=%02X%02X%02X%02X → %s\n",
                   magic[0], magic[1], magic[2], magic[3], ok ? "YES" : "NO");
+#endif
     return ok;
 }
 
 bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
                   uint8_t word_count) {
     if (!seed_part()) {
+#ifdef DEBUG
         Serial.println("[storage] save: no partition");
+#endif
         return false;
     }
 
@@ -89,7 +95,12 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
     memcpy(plain + 32, master_chain, 32);
     size_t clen = aes256_encrypt(AES_KEY, civ, plain, 64, cipher);
     memset(plain, 0, sizeof(plain));
-    if (clen == 0) { Serial.println("[storage] save: encrypt failed"); return false; }
+    if (clen == 0) {
+#ifdef DEBUG
+        Serial.println("[storage] save: encrypt failed");
+#endif
+        return false;
+    }
 
     // Build record — magic slot stays 0x00 until everything else is written
     uint8_t rec[RECORD_SIZE] = {0};
@@ -100,14 +111,18 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
     // Erase sector
     esp_err_t e = esp_partition_erase_range(seed_part(), 0, seed_part()->size);
     if (e != ESP_OK) {
+#ifdef DEBUG
         Serial.printf("[storage] save: erase failed %d\n", e);
+#endif
         return false;
     }
 
     // Write payload (bytes 4–127) first — magic comes last
     e = esp_partition_write_raw(seed_part(), 4, rec + 4, RECORD_SIZE - 4);
     if (e != ESP_OK) {
+#ifdef DEBUG
         Serial.printf("[storage] save: write payload failed %d\n", e);
+#endif
         return false;
     }
 
@@ -115,7 +130,9 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
     uint8_t magic[4] = {SEED_MAGIC_0, SEED_MAGIC_1, SEED_MAGIC_2, SEED_MAGIC_3};
     e = esp_partition_write_raw(seed_part(), 0, magic, 4);
     if (e != ESP_OK) {
+#ifdef DEBUG
         Serial.printf("[storage] save: write magic failed %d\n", e);
+#endif
         return false;
     }
 
@@ -124,11 +141,15 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
     esp_partition_read_raw(seed_part(), 0, vfy, sizeof(vfy));
     if (vfy[0] != SEED_MAGIC_0 || vfy[1] != SEED_MAGIC_1 ||
         vfy[2] != SEED_MAGIC_2 || vfy[3] != SEED_MAGIC_3) {
+#ifdef DEBUG
         Serial.println("[storage] save: READ-BACK FAILED — write did not persist");
+#endif
         return false;
     }
 
+#ifdef DEBUG
     Serial.println("[storage] save: OK");
+#endif
     memset(rec, 0, sizeof(rec));
     memset(civ, 0, sizeof(civ));
     return true;
@@ -136,23 +157,31 @@ bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
 
 bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]) {
     if (!seed_part()) {
+#ifdef DEBUG
         Serial.println("[storage] load: no partition");
+#endif
         return false;
     }
 
     uint8_t rec[RECORD_SIZE] = {0};
     esp_err_t e = esp_partition_read_raw(seed_part(), 0, rec, RECORD_SIZE);
     if (e != ESP_OK) {
+#ifdef DEBUG
         Serial.printf("[storage] load: read failed %d\n", e);
+#endif
         return false;
     }
 
+#ifdef DEBUG
     Serial.printf("[storage] load: magic=%02X%02X%02X%02X\n",
                   rec[0], rec[1], rec[2], rec[3]);
+#endif
 
     if (rec[0] != SEED_MAGIC_0 || rec[1] != SEED_MAGIC_1 ||
         rec[2] != SEED_MAGIC_2 || rec[3] != SEED_MAGIC_3) {
+#ifdef DEBUG
         Serial.println("[storage] load: bad magic");
+#endif
         memset(rec, 0, sizeof(rec));
         return false;
     }
@@ -161,7 +190,9 @@ bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]) {
     size_t plen = aes256_decrypt(AES_KEY, rec + 8, rec + 24, 80, plain);
     memset(rec, 0, sizeof(rec));
 
+#ifdef DEBUG
     Serial.printf("[storage] load: plen=%u\n", plen);
+#endif
 
     if (plen != 64) {
         memset(plain, 0, sizeof(plain));
@@ -171,7 +202,9 @@ bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]) {
     memcpy(master_key,   plain,      32);
     memcpy(master_chain, plain + 32, 32);
     memset(plain, 0, sizeof(plain));
+#ifdef DEBUG
     Serial.println("[storage] load: OK");
+#endif
     return true;
 }
 
@@ -185,5 +218,7 @@ uint8_t storage_word_count() {
 void storage_wipe() {
     if (!seed_part()) return;
     esp_partition_erase_range(seed_part(), 0, seed_part()->size);
+#ifdef DEBUG
     Serial.println("[storage] wiped");
+#endif
 }

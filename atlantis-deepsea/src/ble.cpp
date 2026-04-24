@@ -48,11 +48,11 @@ void ble_init() {
     BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_MITM);
     BLEDevice::setSecurityCallbacks(new AtlantisSecurity());
 
-    BLESecurity* sec = new BLESecurity();
-    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-    sec->setCapability(ESP_IO_CAP_OUT);   // display-only: device shows passkey
-    sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-    sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+    BLESecurity sec;
+    sec.setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+    sec.setCapability(ESP_IO_CAP_OUT);   // display-only: device shows passkey
+    sec.setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+    sec.setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 }
 
 bool ble_connected() { return bleKb.isConnected(); }

@@ -255,7 +255,8 @@ size_t aes256_encrypt(const uint8_t key[32], const uint8_t iv[16],
     mbedtls_aes_setkey_enc(&ctx, key, 256);
     mbedtls_aes_crypt_cbc(&ctx, MBEDTLS_AES_ENCRYPT, padded, iv_copy, buf, cipher_out);
     mbedtls_aes_free(&ctx);
-    memset(buf, 0, padded);
+    memset(buf,     0, padded);
+    memset(iv_copy, 0, 16);
     return padded;
 }
 
@@ -272,6 +273,7 @@ size_t aes256_decrypt(const uint8_t key[32], const uint8_t iv[16],
     mbedtls_aes_setkey_dec(&ctx, key, 256);
     mbedtls_aes_crypt_cbc(&ctx, MBEDTLS_AES_DECRYPT, cipher_len, iv_copy, cipher, plain_out);
     mbedtls_aes_free(&ctx);
+    memset(iv_copy, 0, 16);
 
     // Remove PKCS7 padding
     uint8_t pad = plain_out[cipher_len - 1];

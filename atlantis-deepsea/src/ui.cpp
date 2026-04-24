@@ -721,8 +721,9 @@ void ui_show_password(const char* pwd, uint32_t index, uint8_t len) {
     redraw_footer();
 
     bool prev_conn = ble_connected();
+    uint32_t show_until = millis() + PWD_SHOW_MS;
 
-    while (true) {
+    while (millis() < show_until) {
         btns_poll();
 
         // Show passkey popup if a BLE pairing request arrives
