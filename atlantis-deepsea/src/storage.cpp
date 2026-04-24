@@ -2,197 +2,197 @@
 #include "crypto.h"
 #include "config.h"
 #include <nvs_flash.h>
-#include <nvs.h>
+#include <esp_partition.h>
 #include <string.h>
 #include <Arduino.h>
 
-// NVS keys
-#define KEY_SETUP   "setup"     // uint8  — 0x01 when configured
-#define KEY_WC      "wc"        // uint8  — word count (12 or 24)
-#define KEY_PSALT   "psalt"     // blob 16 — PIN PBKDF2 salt
-#define KEY_PHASH   "phash"     // blob 32 — PIN key hash (verify without decrypt)
-#define KEY_CSALT   "csalt"     // blob 16 — cipher key derivation salt
-#define KEY_CIV     "civ"       // blob 16 — AES-CBC IV
-#define KEY_CDATA   "cdata"     // blob 80 — encrypted (master_key || master_chain)
-#define KEY_FAILS   "fails"     // uint8  — consecutive wrong PIN count
-#define KEY_LOCKTS  "lockts"    // uint32 — lockout start timestamp (ms, 0 = none)
-#define KEY_PINLEN  "pinlen"    // uint8  — PIN_LENGTH when storage was written
+// ── Seed partition ─────────────────────────────────────────────────────────────
+// Dedicated 4 KB flash partition ("seed", subtype 0x99, offset 0xC000).
+// Never touched by esptool, NVS, or BLE.  Raw reads/writes via esp_partition
+// _raw APIs to bypass the SPI flash cache entirely.
+//
+// Record layout (128 bytes, 4-byte aligned throughout):
+//   [0–3]    magic: 0xAD 0xEE 0x75 0xEA  — written LAST so partial writes
+//                                           leave storage_is_setup() == false
+//   [4]      word_count
+//   [5–7]    reserved 0x00
+//   [8–23]   AES-CBC IV (16 bytes)
+//   [24–103] AES256-CBC(AES_KEY, iv, master_key ∥ master_chain)  (80 bytes)
+//   [104–127] padding 0x00
 
-// Always open a fresh handle — never cache; BLE stack may reinitialise NVS
-// between calls, so a stale handle would silently return ESP_ERR_NVS_INVALID_HANDLE.
-static bool nvs_open_rw(nvs_handle_t* h) {
-    return nvs_open(NVS_NAMESPACE, NVS_READWRITE, h) == ESP_OK;
-}
+#define SEED_MAGIC_0  0xAD
+#define SEED_MAGIC_1  0xEE
+#define SEED_MAGIC_2  0x75
+#define SEED_MAGIC_3  0xEA
+#define RECORD_SIZE   128
+
+static const uint8_t AES_KEY[32] = {
+    0x4A, 0x3B, 0x7C, 0x91, 0xDE, 0x25, 0x6F, 0x08,
+    0xB3, 0x5E, 0xA1, 0x74, 0x2D, 0xC8, 0x9F, 0x1B,
+    0x62, 0x48, 0xE7, 0x3A, 0x0D, 0x95, 0x57, 0xF2,
+    0x81, 0x4C, 0xB6, 0x29, 0xD3, 0x6E, 0xAA, 0x5C
+};
+
+// Cached at storage_init() — valid for the lifetime of the firmware run.
+static const esp_partition_t* s_part = nullptr;
+
+static const esp_partition_t* seed_part() { return s_part; }
+
+// ── Init ───────────────────────────────────────────────────────────────────────
 
 void storage_init() {
+    // NVS for BLE stack (unchanged)
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
         nvs_flash_init();
     }
 
-    // millis() resets on every boot — clear the in-session lockout timestamp.
-    nvs_handle_t h;
-    if (nvs_open_rw(&h)) {
-        nvs_set_u32(h, KEY_LOCKTS, 0);
-        nvs_commit(h);
-        nvs_close(h);
+    // Locate seed partition once — abort loudly if missing
+    s_part = esp_partition_find_first(
+                 ESP_PARTITION_TYPE_DATA,
+                 (esp_partition_subtype_t)0x99,
+                 "seed");
+
+    if (s_part) {
+#ifdef DEBUG
+        Serial.printf("[storage] seed part @ 0x%X  size 0x%X\n",
+                      s_part->address, s_part->size);
+#endif
+    } else {
+        Serial.println("[storage] ERROR: seed partition NOT FOUND");
     }
 }
 
+// ── Public API ────────────────────────────────────────────────────────────────
+
 bool storage_is_setup() {
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return false;
-    uint8_t v = 0;
-    nvs_get_u8(h, KEY_SETUP, &v);
-    nvs_close(h);
-    return v == 0x01;
+    if (!seed_part()) return false;
+    uint8_t magic[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    esp_partition_read_raw(seed_part(), 0, magic, sizeof(magic));
+    bool ok = magic[0] == SEED_MAGIC_0 && magic[1] == SEED_MAGIC_1 &&
+              magic[2] == SEED_MAGIC_2 && magic[3] == SEED_MAGIC_3;
+#ifdef DEBUG
+    Serial.printf("[storage] is_setup: magic=%02X%02X%02X%02X → %s\n",
+                  magic[0], magic[1], magic[2], magic[3], ok ? "YES" : "NO");
+#endif
+    return ok;
 }
 
 bool storage_save(const uint8_t master_key[32], const uint8_t master_chain[32],
-                  const char pin[7], uint8_t word_count) {
-    // Random salts + IV
-    uint8_t psalt[16], csalt[16], civ[16];
-    crypto_rand(psalt, 16);
-    crypto_rand(csalt, 16);
-    crypto_rand(civ,   16);
+                  uint8_t word_count) {
+    if (!seed_part()) {
+#ifdef DEBUG
+        Serial.println("[storage] save: no partition");
+#endif
+        return false;
+    }
 
-    // PIN verification hash
-    uint8_t phash[32];
-    pin_to_key(pin, psalt, phash);
-
-    // Cipher key (different salt from PIN hash)
-    uint8_t ckey[32];
-    pin_to_key(pin, csalt, ckey);
-
-    // Encrypt master_key || master_chain  (64 bytes → 80 bytes with PKCS7)
-    uint8_t plain[64], cipher[80];
+    // Encrypt
+    uint8_t plain[64], cipher[80], civ[16];
+    crypto_rand(civ, 16);
     memcpy(plain,      master_key,   32);
     memcpy(plain + 32, master_chain, 32);
-    size_t clen = aes256_encrypt(ckey, civ, plain, 64, cipher);
-    memset(plain, 0, 64);
-    memset(ckey,  0, 32);
+    size_t clen = aes256_encrypt(AES_KEY, civ, plain, 64, cipher);
+    memset(plain, 0, sizeof(plain));
+    if (clen == 0) {
+#ifdef DEBUG
+        Serial.println("[storage] save: encrypt failed");
+#endif
+        return false;
+    }
 
-    if (clen == 0) return false;
+    // Build record — magic slot stays 0x00 until everything else is written
+    uint8_t rec[RECORD_SIZE] = {0};
+    rec[4] = word_count;
+    memcpy(rec + 8,  civ,    16);
+    memcpy(rec + 24, cipher, 80);
 
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return false;
+    // Erase sector
+    esp_err_t e = esp_partition_erase_range(seed_part(), 0, seed_part()->size);
+    if (e != ESP_OK) {
+#ifdef DEBUG
+        Serial.printf("[storage] save: erase failed %d\n", e);
+#endif
+        return false;
+    }
 
-    nvs_set_u8  (h, KEY_SETUP,  0x01);
-    nvs_set_u8  (h, KEY_PINLEN, (uint8_t)PIN_LENGTH);
-    nvs_set_u8  (h, KEY_WC,     word_count);
-    nvs_set_u8  (h, KEY_FAILS,  0);
-    nvs_set_u32 (h, KEY_LOCKTS, 0);
-    nvs_set_blob(h, KEY_PSALT, psalt, 16);
-    nvs_set_blob(h, KEY_PHASH, phash, 32);
-    nvs_set_blob(h, KEY_CSALT, csalt, 16);
-    nvs_set_blob(h, KEY_CIV,   civ,   16);
-    nvs_set_blob(h, KEY_CDATA, cipher, clen);
-    nvs_commit(h);
-    nvs_close(h);
+    // Write payload (bytes 4–127) first — magic comes last
+    e = esp_partition_write_raw(seed_part(), 4, rec + 4, RECORD_SIZE - 4);
+    if (e != ESP_OK) {
+#ifdef DEBUG
+        Serial.printf("[storage] save: write payload failed %d\n", e);
+#endif
+        return false;
+    }
 
-    memset(phash, 0, 32);
-    memset(civ,   0, 16);
+    // Write magic (bytes 0–3) — marks record as valid
+    uint8_t magic[4] = {SEED_MAGIC_0, SEED_MAGIC_1, SEED_MAGIC_2, SEED_MAGIC_3};
+    e = esp_partition_write_raw(seed_part(), 0, magic, 4);
+    if (e != ESP_OK) {
+#ifdef DEBUG
+        Serial.printf("[storage] save: write magic failed %d\n", e);
+#endif
+        return false;
+    }
+
+    // Read-back verification — confirm data physically persists right now
+    uint8_t vfy[4] = {0};
+    esp_partition_read_raw(seed_part(), 0, vfy, sizeof(vfy));
+    if (vfy[0] != SEED_MAGIC_0 || vfy[1] != SEED_MAGIC_1 ||
+        vfy[2] != SEED_MAGIC_2 || vfy[3] != SEED_MAGIC_3) {
+#ifdef DEBUG
+        Serial.println("[storage] save: READ-BACK FAILED — write did not persist");
+#endif
+        return false;
+    }
+
+#ifdef DEBUG
+    Serial.println("[storage] save: OK");
+#endif
+    memset(rec, 0, sizeof(rec));
+    memset(civ, 0, sizeof(civ));
     return true;
 }
 
-bool storage_is_locked_out() {
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return false;
-
-    uint8_t fails = 0;
-    nvs_get_u8(h, KEY_FAILS, &fails);
-
-    if (fails < PIN_MAX_ATTEMPTS) {
-        nvs_close(h);
+bool storage_load(uint8_t master_key[32], uint8_t master_chain[32]) {
+    if (!seed_part()) {
+#ifdef DEBUG
+        Serial.println("[storage] load: no partition");
+#endif
         return false;
     }
 
-    uint32_t ts = 0;
-    nvs_get_u32(h, KEY_LOCKTS, &ts);
-
-    if (ts == 0) {
-        // Max fails reached but no in-session timestamp yet (e.g. first check
-        // after reboot).  Start a fresh lockout timer now.
-        ts = millis();
-        nvs_set_u32(h, KEY_LOCKTS, ts);
-        nvs_commit(h);
-    }
-    nvs_close(h);
-
-    return (millis() - ts) < PIN_LOCKOUT_MS;
-}
-
-int storage_attempts_left() {
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return PIN_MAX_ATTEMPTS;
-    uint8_t fails = 0;
-    nvs_get_u8(h, KEY_FAILS, &fails);
-    nvs_close(h);
-    int left = PIN_MAX_ATTEMPTS - (int)fails;
-    return left < 0 ? 0 : left;
-}
-
-bool storage_load(const char pin[7],
-                  uint8_t master_key[32], uint8_t master_chain[32]) {
-    if (storage_is_locked_out()) return false;
-
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return false;
-
-    // Verify PIN hash
-    uint8_t psalt[16], phash_stored[32], phash_calc[32];
-    size_t sz = 16;
-    bool read_ok = (nvs_get_blob(h, KEY_PSALT, psalt, &sz) == ESP_OK);
-    sz = 32;
-    read_ok = read_ok && (nvs_get_blob(h, KEY_PHASH, phash_stored, &sz) == ESP_OK);
-
-    if (!read_ok) {
-        // NVS unreadable — treat as wrong PIN and count the attempt
-        uint8_t fails = 0;
-        nvs_get_u8(h, KEY_FAILS, &fails);
-        fails++;
-        nvs_set_u8(h, KEY_FAILS, fails);
-        if (fails >= PIN_MAX_ATTEMPTS) {
-            nvs_set_u32(h, KEY_LOCKTS, millis());
-        }
-        nvs_commit(h);
-        nvs_close(h);
+    uint8_t rec[RECORD_SIZE] = {0};
+    esp_err_t e = esp_partition_read_raw(seed_part(), 0, rec, RECORD_SIZE);
+    if (e != ESP_OK) {
+#ifdef DEBUG
+        Serial.printf("[storage] load: read failed %d\n", e);
+#endif
         return false;
     }
 
-    pin_to_key(pin, psalt, phash_calc);
-    bool pin_ok = (memcmp(phash_calc, phash_stored, 32) == 0);
-    memset(phash_calc, 0, 32);
+#ifdef DEBUG
+    Serial.printf("[storage] load: magic=%02X%02X%02X%02X\n",
+                  rec[0], rec[1], rec[2], rec[3]);
+#endif
 
-    if (!pin_ok) {
-        uint8_t fails = 0;
-        nvs_get_u8(h, KEY_FAILS, &fails);
-        fails++;
-        nvs_set_u8(h, KEY_FAILS, fails);
-        if (fails >= PIN_MAX_ATTEMPTS) {
-            nvs_set_u32(h, KEY_LOCKTS, millis());
-        }
-        nvs_commit(h);
-        nvs_close(h);
+    if (rec[0] != SEED_MAGIC_0 || rec[1] != SEED_MAGIC_1 ||
+        rec[2] != SEED_MAGIC_2 || rec[3] != SEED_MAGIC_3) {
+#ifdef DEBUG
+        Serial.println("[storage] load: bad magic");
+#endif
+        memset(rec, 0, sizeof(rec));
         return false;
     }
 
-    // PIN correct — reset fail counter
-    nvs_set_u8(h, KEY_FAILS, 0);
-    nvs_commit(h);
+    uint8_t plain[80] = {0};
+    size_t plen = aes256_decrypt(AES_KEY, rec + 8, rec + 24, 80, plain);
+    memset(rec, 0, sizeof(rec));
 
-    // Decrypt master key
-    uint8_t csalt[16], civ[16], cipher[80], plain[80];
-    sz = 16; nvs_get_blob(h, KEY_CSALT, csalt,  &sz);
-    sz = 16; nvs_get_blob(h, KEY_CIV,   civ,    &sz);
-    sz = 80; nvs_get_blob(h, KEY_CDATA, cipher, &sz);
-    nvs_close(h);
-
-    uint8_t ckey[32];
-    pin_to_key(pin, csalt, ckey);
-    size_t plen = aes256_decrypt(ckey, civ, cipher, sz, plain);
-    memset(ckey, 0, 32);
+#ifdef DEBUG
+    Serial.printf("[storage] load: plen=%u\n", plen);
+#endif
 
     if (plen != 64) {
         memset(plain, 0, sizeof(plain));
@@ -202,22 +202,23 @@ bool storage_load(const char pin[7],
     memcpy(master_key,   plain,      32);
     memcpy(master_chain, plain + 32, 32);
     memset(plain, 0, sizeof(plain));
+#ifdef DEBUG
+    Serial.println("[storage] load: OK");
+#endif
     return true;
 }
 
 uint8_t storage_word_count() {
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return 12;
+    if (!seed_part()) return 12;
     uint8_t wc = 12;
-    nvs_get_u8(h, KEY_WC, &wc);
-    nvs_close(h);
+    esp_partition_read_raw(seed_part(), 4, &wc, 1);
     return wc;
 }
 
 void storage_wipe() {
-    nvs_handle_t h;
-    if (!nvs_open_rw(&h)) return;
-    nvs_erase_all(h);
-    nvs_commit(h);
-    nvs_close(h);
+    if (!seed_part()) return;
+    esp_partition_erase_range(seed_part(), 0, seed_part()->size);
+#ifdef DEBUG
+    Serial.println("[storage] wiped");
+#endif
 }

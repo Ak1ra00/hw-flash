@@ -45,9 +45,13 @@ jobs:
 
     - name: Collect boot_app0.bin from PlatformIO packages
       run: |
-        BOOT=$(find ~/.platformio -name "boot_app0.bin" \
-               | grep "arduinoespressif32" | head -1)
+        BOOT=$(find ~/.platformio -name "boot_app0.bin" 2>/dev/null | head -1)
         echo "boot_app0 path: $BOOT"
+        if [ -z "$BOOT" ]; then
+          echo "ERROR: boot_app0.bin not found, listing .bin files:"
+          find ~/.platformio -name "*.bin" 2>/dev/null | head -20
+          exit 1
+        fi
         cp "$BOOT" boot_app0.bin
 
     - name: Upload firmware artifacts
@@ -86,7 +90,7 @@ jobs:
         ls -la flasher-workspace/
 
     - name: Install Python dependencies
-      run: pip install pyinstaller esptool pyserial
+      run: pip install pyinstaller esptool pyserial mnemonic
 
     - name: Build single-file .exe with PyInstaller
       working-directory: flasher-workspace
@@ -97,6 +101,7 @@ jobs:
           --console \
           --name "AtlantisDeepSea-Flasher" \
           --collect-data esptool \
+          --collect-data mnemonic \
           --add-data "bootloader.bin;." \
           --add-data "partitions.bin;." \
           --add-data "boot_app0.bin;." \

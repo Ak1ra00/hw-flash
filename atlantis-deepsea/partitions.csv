@@ -1,0 +1,10 @@
+# Atlantis DeepSea — 4 MB flash
+# seed partition at 0xC000 is NEVER written by esptool, NVS, or BLE.
+# NVS shrunk to 12 KB — still plenty for BLE bonds.
+# Never change seed offset/size or the stored seed will be lost.
+#
+# Name,   Type, SubType,  Offset,   Size
+nvs,      data, nvs,      0x9000,   0x3000
+seed,     data, 0x99,     0xC000,   0x1000
+otadata,  data, ota,      0xe000,   0x2000
+app0,     app,  ota_0,    0x10000,  0x3F0000

@@ -23,12 +23,6 @@ bool btns_both();
 // Poll buttons (call each loop tick; updates internal state)
 void btns_poll();
 
-// ── PIN screen ───────────────────────────────────────────────────────────────
-// Interactive PIN entry.  Returns true when user finishes entering 6 digits.
-// pin_out must be 7 bytes (6 digits + null).
-// Shows "Wrong PIN  N attempts left" if wrong = true.
-bool ui_pin_entry(char pin_out[7], bool wrong, int attempts_left, bool locked_out, uint32_t lockout_remaining_ms);
-
 // ── Setup: choose word count ─────────────────────────────────────────────────
 // Returns 12 or 24
 int  ui_choose_word_count();
@@ -50,7 +44,6 @@ enum MenuItem {
     MENU_GET_PASSWORD = 0,
     MENU_SETTINGS,
     MENU_ABOUT,
-    MENU_LOCK,
     MENU_COUNT
 };
 MenuItem ui_main_menu();
@@ -73,6 +66,20 @@ void ui_about();
 void ui_seed_invalid();
 
 // ── BLE passkey display ────────────────────────────────────────────────────────
-// Show a 6-digit BLE pairing passkey.  Blocks until pairing completes or
-// times out (~2 min).  Caller must clear ble_passkey_pending() first.
+// Show a 6-digit BLE pairing passkey.  Stays on screen until user dismisses.
 void ui_show_passkey(uint32_t code);
+
+// ── Settings menu ─────────────────────────────────────────────────────────────
+enum SettingsItem {
+    SETTINGS_BLUETOOTH = 0,
+    SETTINGS_FACTORY_RESET,
+    SETTINGS_COUNT
+};
+SettingsItem ui_settings_menu();
+
+// ── Bluetooth settings screen ─────────────────────────────────────────────────
+void ui_ble_settings();
+
+// ── Serial provisioning screen ────────────────────────────────────────────────
+// Non-blocking: draws "Waiting for PC..." screen once. Caller polls buttons.
+void ui_show_provisioning();

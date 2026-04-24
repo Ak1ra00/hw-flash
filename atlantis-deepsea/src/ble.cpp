@@ -13,11 +13,6 @@ static volatile uint32_t s_passkey   = 0;
 static volatile bool     s_pair_done = false;
 static volatile bool     s_pair_ok   = false;
 
-// Remote device address, captured on every successful authentication so we can
-// force-disconnect when leaving the password page.
-static esp_bd_addr_t s_remote_addr  = {0};
-static volatile bool s_has_remote   = false;
-
 // ── Security callbacks (run on BLE task, not the Arduino loop) ────────────────
 class AtlantisSecurity : public BLESecurityCallbacks {
     // Device is display-only (ESP_IO_CAP_OUT): we generate the passkey.
@@ -33,10 +28,6 @@ class AtlantisSecurity : public BLESecurityCallbacks {
     // Called once when pairing/authentication completes — also fires on
     // bonded re-connections that re-establish encryption.
     void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override {
-        if (cmpl.success) {
-            memcpy(s_remote_addr, cmpl.bd_addr, sizeof(esp_bd_addr_t));
-            s_has_remote = true;
-        }
         s_pair_ok   = (cmpl.success == true);
         s_pair_done = true;
     }
@@ -48,9 +39,8 @@ class AtlantisSecurity : public BLESecurityCallbacks {
 
 void ble_init() {
     // begin() calls BLEDevice::init() and starts advertising automatically.
-    // We stop advertising immediately — BLE is only active on the password page.
+    // BLE stays on and advertising at all times — no enable/disable per page.
     bleKb.begin();
-    BLEDevice::getAdvertising()->stop();
 
     // Secure passkey display with MITM protection and persistent bonding.
     // Bonding info is stored in NVS by the BLE stack and loaded automatically
@@ -58,37 +48,48 @@ void ble_init() {
     BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_MITM);
     BLEDevice::setSecurityCallbacks(new AtlantisSecurity());
 
-    BLESecurity* sec = new BLESecurity();
-    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-    sec->setCapability(ESP_IO_CAP_OUT);   // display-only: device shows passkey
-    sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-    sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-}
-
-// Start advertising — call when entering the password display page.
-void ble_enable() {
-    BLEDevice::getAdvertising()->start();
-}
-
-// Stop advertising and drop any active connection — call when leaving the
-// password display page so the host's on-screen keyboard is restored.
-void ble_disable() {
-    BLEDevice::getAdvertising()->stop();
-    if (s_has_remote && bleKb.isConnected()) {
-        esp_ble_gap_disconnect(s_remote_addr);
-        s_has_remote = false;
-    }
+    BLESecurity sec;
+    sec.setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+    sec.setCapability(ESP_IO_CAP_OUT);   // display-only: device shows passkey
+    sec.setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+    sec.setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 }
 
 bool ble_connected() { return bleKb.isConnected(); }
 
-// Type a string via BLE HID and release all keys so the last character
-// does not repeat.
+// Type a string via BLE HID.
+// Each character is sent individually with a small inter-key delay so the
+// HID reports have time to flush through the BLE stack before the next one
+// is queued.  A final releaseAll() with extra hold time guarantees the
+// host sees a clean key-up for the last character.
 void ble_type(const char* str) {
     if (!bleKb.isConnected()) return;
-    bleKb.print(str);
-    delay(20);          // let the HID report flush
-    bleKb.releaseAll(); // explicit key-up clears the "last char repeating" bug
+    bleKb.releaseAll();   // clear any lingering state first
+    delay(20);
+    for (const char* p = str; *p; p++) {
+        bleKb.write((uint8_t)*p);
+        delay(10);        // one BLE connection event at typical 7.5 ms interval
+    }
+    delay(80);            // let the last key-up report reach the host
+    bleKb.releaseAll();   // explicit all-keys-up
+    delay(20);
+    bleKb.releaseAll();   // second send for safety
+}
+
+// Erase all stored BLE bonding info.  The next connection will require
+// re-pairing with a passkey.
+void ble_forget_bonds() {
+    int num = esp_ble_get_bond_device_num();
+    if (num <= 0) return;
+    esp_ble_bond_dev_t* list = new esp_ble_bond_dev_t[num];
+    esp_ble_get_bond_device_list(&num, list);
+    for (int i = 0; i < num; i++)
+        esp_ble_remove_bond_device(list[i].bd_addr);
+    delete[] list;
+}
+
+int ble_bond_count() {
+    return esp_ble_get_bond_device_num();
 }
 
 uint32_t ble_passkey_pending() { return s_passkey;   }

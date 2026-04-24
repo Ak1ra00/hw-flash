@@ -3,20 +3,17 @@
 #include <stdbool.h>
 
 // ── BLE keyboard with secure passkey pairing + bonding ───────────────────────
+// BLE advertises from boot and stays on permanently.
 // Call ble_init() once in setup(), before storage_init().
-// BLE does NOT advertise at boot — call ble_enable() / ble_disable() to
-// control advertising from the password display page only.
 
 void     ble_init();
-
-// Start / stop BLE advertising and active connection.
-// ble_enable()  — enter password page
-// ble_disable() — leave password page (disconnects host so soft keyboard returns)
-void     ble_enable();
-void     ble_disable();
-
 bool     ble_connected();
 void     ble_type(const char* str);  // prints + releaseAll to prevent key repeat
+
+// Remove all stored bonded devices (user must re-pair with passkey).
+void     ble_forget_bonds();
+// Number of currently bonded devices stored in NVS.
+int      ble_bond_count();
 
 // Passkey notification: set by BLE security callback when the host requests
 // passkey-based pairing.  Check with ble_passkey_pending(); call

@@ -8,15 +8,11 @@
 // ── App state machine ─────────────────────────────────────────────────────────
 enum AppState {
     STATE_BOOT,
-    STATE_PIN_ENTRY,
     STATE_SETUP_WORD_COUNT,
     STATE_SEED_ENTRY,
     STATE_SEED_CONFIRM,
     STATE_MAIN_MENU,
     STATE_GET_PASSWORD,
-    STATE_SETTINGS,
-    STATE_ABOUT,
-    STATE_LOCKED,
 };
 
 static AppState       state          = STATE_BOOT;
@@ -29,19 +25,101 @@ static uint32_t       last_activity  = 0;
 static char           seed_words[24][10];
 static int            word_count     = 12;
 
+// ── Serial provisioning ───────────────────────────────────────────────────────
+
+static bool hex_to_bytes(const char* hex, uint8_t* out, int len) {
+    for (int i = 0; i < len; i++) {
+        char h[3] = {hex[i*2], hex[i*2+1], '\0'};
+        if (!isxdigit((uint8_t)h[0]) || !isxdigit((uint8_t)h[1])) return false;
+        out[i] = (uint8_t)strtol(h, nullptr, 16);
+    }
+    return true;
+}
+
+// Listens on Serial for a PROVISION packet from the flasher.
+// Broadcasts ATLANTIS_READY every 2 s so the PC can connect at any time.
+// Either button skips to on-device manual entry.
+// Returns true if keys were received, saved, and loaded into RAM.
+static bool try_serial_provision() {
+    ui_show_provisioning();
+
+    char    buf[200];
+    int     buf_len   = 0;
+    uint32_t start    = millis();
+    uint32_t last_rdy = 0;
+
+    while (millis() - start < 60000UL) {
+        btns_poll();
+        if (btn1_short() || btn2_short() || btns_both()) return false;
+
+        // Announce readiness every 2 s so PC can connect even if it opens
+        // the port after the first broadcast.
+        if (millis() - last_rdy >= 2000UL) {
+            Serial.println("ATLANTIS_READY");
+            last_rdy = millis();
+        }
+
+        while (Serial.available()) {
+            char c = Serial.read();
+            if (c == '\n' || c == '\r') {
+                if (buf_len > 0) {
+                    buf[buf_len] = '\0';
+                    // Expected: PROVISION:<64hex_key>:<64hex_chain>:<wc>
+                    if (strncmp(buf, "PROVISION:", 10) == 0 &&
+                        buf_len >= 10 + 64 + 1 + 64 + 1 + 2) {
+                        const char* p = buf + 10;
+                        uint8_t key[32] = {0}, chain[32] = {0};
+                        bool ok = false;
+                        int  wc = 0;
+
+                        if (hex_to_bytes(p, key, 32)) {
+                            p += 64;
+                            if (*p == ':') {
+                                p++;
+                                if (hex_to_bytes(p, chain, 32)) {
+                                    p += 64;
+                                    if (*p == ':') {
+                                        wc = atoi(p + 1);
+                                        ok = (wc == 12 || wc == 24);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (ok && storage_save(key, chain, (uint8_t)wc)) {
+                            memcpy(master_key,   key,   32);
+                            memcpy(master_chain, chain, 32);
+                            key_loaded = true;
+                            memset(key,   0, 32);
+                            memset(chain, 0, 32);
+                            Serial.println("PROVISION_OK");
+                            delay(100);
+                            ui_message("Seed Saved!",
+                                       "Device ready.\nYou can unplug\nthe USB now.", 3000);
+                            state = STATE_MAIN_MENU;
+                            return true;
+                        }
+
+                        Serial.println("PROVISION_ERR");
+                        memset(key,   0, 32);
+                        memset(chain, 0, 32);
+                    }
+                    buf_len = 0;
+                }
+            } else if (buf_len < (int)sizeof(buf) - 1) {
+                buf[buf_len++] = c;
+            }
+        }
+        delay(10);
+    }
+    return false;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 static void clear_keys() {
     memset(master_key,   0, 32);
     memset(master_chain, 0, 32);
     key_loaded = false;
-}
-
-static void touch_activity() {
-    last_activity = millis();
-}
-
-static bool idle_timeout() {
-    return key_loaded && ((millis() - last_activity) > AUTO_LOCK_MS);
 }
 
 // ── Setup: gather mnemonic and store ─────────────────────────────────────────
@@ -87,138 +165,118 @@ static void run_setup() {
     bip32_master(seed, 64, master_key, master_chain);
     memset(seed, 0, 64);
 
-    // 6. Set secret combo (3 emoji symbols)
-    ui_message("Set Combo", "Pick 3 emoji symbols\nas your secret combo.", 2000);
-    char pin[7] = {0};
-    char pin2[7] = {0};
-    bool pin_ok = false;
-    while (!pin_ok) {
-        ui_pin_entry(pin,  false, PIN_MAX_ATTEMPTS, false, 0);
-        ui_message("Confirm Combo", "Re-enter your combo.", 1200);
-        ui_pin_entry(pin2, false, PIN_MAX_ATTEMPTS, false, 0);
-        if (strcmp(pin, pin2) == 0) {
-            pin_ok = true;
-        } else {
-            memset(pin, 0, 7); memset(pin2, 0, 7);
-            ui_message("Mismatch", "Combos didn't match.\nTry again.", 1500);
-        }
-    }
+    // Clear seed words immediately — no longer needed
+    for (int i = 0; i < 24; i++) memset(seed_words[i], 0, 10);
 
-    // 7. Save to storage
-    if (!storage_save(master_key, master_chain, pin, (uint8_t)word_count)) {
+    // 6. Save to storage (hardware-bound key, no user PIN required)
+    if (!storage_save(master_key, master_chain, (uint8_t)word_count)) {
         ui_message("Error", "Failed to save.\nDevice may need reset.", 3000);
         clear_keys();
         ESP.restart();
     }
-    memset(pin, 0, 7); memset(pin2, 0, 7);
-
-    // Clear seed words from RAM
-    for (int i = 0; i < 24; i++) memset(seed_words[i], 0, 10);
 
     key_loaded = true;
-    touch_activity();
+    last_activity = millis();
 
     ui_message("Success!", "Wallet stored securely.\nEntering vault...", 2000);
     state = STATE_MAIN_MENU;
 }
 
-// ── PIN unlock ────────────────────────────────────────────────────────────────
-static void run_pin_entry() {
-    bool wrong = false;
-    int  attempts_left = storage_attempts_left();
-
-    while (true) {
-        char pin[7] = {0};
-        ui_pin_entry(pin, wrong, attempts_left, false, 0);
-
-        if (storage_load(pin, master_key, master_chain)) {
-            memset(pin, 0, 7);
-            key_loaded = true;
-            touch_activity();
-            state = STATE_MAIN_MENU;
-            return;
-        }
-
-        memset(pin, 0, 7);
-        wrong = true;
-        attempts_left = storage_attempts_left();
-
-        if (attempts_left == 0) {
-            // Security wipe — erase seed and all data, restart as new device
-            ui_message("SECURITY WIPE",
-                       "5 wrong combos.\nErasing all data...", 3000);
-            storage_wipe();
-            ESP.restart();
-        }
-    }
-}
-
 // ── Settings sub-menu ─────────────────────────────────────────────────────────
 static void run_settings() {
-    ui_message("Settings",
-               "Hold BTN1 at boot to\ndo factory reset.", 0);
+    SettingsItem choice = ui_settings_menu();
+    if (choice == SETTINGS_BLUETOOTH) {
+        ui_ble_settings();
+    } else if (choice == SETTINGS_FACTORY_RESET) {
+        // Confirm then wipe
+        ui_message("Factory Reset",
+                   "Hold BTN1 3s to wipe\nall data.", 0);
+        uint32_t start = millis();
+        while (millis() - start < 10000UL) {
+            btns_poll();
+            if (btn1_long()) {
+                storage_wipe();
+                ui_message("Wiped", "All data erased.\nRestarting...", 2000);
+                ESP.restart();
+            }
+            if (btn2_short() || btns_both()) break;
+            delay(8);
+        }
+    }
+    // SETTINGS_COUNT (back) or unknown — return to menu
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     ui_init();
-    ble_init();       // BLE must init first — it calls nvs_flash_init internally
-    storage_init();
+    storage_init();   // Init NVS first — if BLE sees it already initialized
+    ble_init();       // it gets INVALID_STATE and skips nvs_flash_erase()
     state = STATE_BOOT;
 }
 
 void loop() {
     btns_poll();
 
-    // Global idle auto-lock
-    if (idle_timeout()) {
-        clear_keys();
-        state = STATE_LOCKED;
+    // Auto-lock after idle timeout — clear keys and return to boot screen
+    if (key_loaded && state == STATE_MAIN_MENU &&
+        millis() - last_activity > AUTO_LOCK_MS) {
+        memset(master_key,   0, 32);
+        memset(master_chain, 0, 32);
+        key_loaded = false;
+        state = STATE_BOOT;
     }
 
     switch (state) {
 
     case STATE_BOOT:
         ui_boot();
-        if (storage_is_setup())
-            state = STATE_PIN_ENTRY;
-        else
-            run_setup();
-        break;
-
-    case STATE_PIN_ENTRY:
-    case STATE_LOCKED:
-        run_pin_entry();
+        if (storage_is_setup()) {
+            // Load keys directly — no PIN required
+            if (storage_load(master_key, master_chain)) {
+                key_loaded = true;
+                state = STATE_MAIN_MENU;
+            } else {
+                // Stored data is unreadable (likely saved by an older firmware
+                // version with a different encryption scheme).  Wipe and re-enter.
+                ui_message("Re-enter Seed",
+                           "Seed needs re-entry\n(firmware updated).\nPlease re-enter now.", 3000);
+                storage_wipe();
+                run_setup();
+            }
+        } else {
+            // Try PC provisioning first (60 s window); fall back to on-device
+            if (!try_serial_provision()) {
+                run_setup();
+            }
+        }
         break;
 
     case STATE_MAIN_MENU: {
-        touch_activity();
         MenuItem choice = ui_main_menu();
-        touch_activity();
+        last_activity = millis();
         switch (choice) {
             case MENU_GET_PASSWORD: state = STATE_GET_PASSWORD; break;
             case MENU_SETTINGS:     run_settings(); break;
             case MENU_ABOUT:        ui_about(); break;
-            case MENU_LOCK:
-                clear_keys();
-                state = STATE_LOCKED;
-                break;
             default: break;
         }
         break;
     }
 
     case STATE_GET_PASSWORD: {
-        touch_activity();
+        if (!key_loaded) {
+            ui_message("No Seed", "No seed loaded.\nUse Settings >\nFactory Reset.", 3000);
+            state = STATE_MAIN_MENU;
+            break;
+        }
+
         uint32_t idx = 0;
 
         if (!ui_password_config(&idx)) {
             state = STATE_MAIN_MENU;
             break;
         }
-
-        touch_activity();
 
         ui_message("Deriving...", "Computing password...", 1200);
 
@@ -232,20 +290,9 @@ void loop() {
             memset(pwd, 0, sizeof(pwd));
         }
 
-        touch_activity();
         state = STATE_MAIN_MENU;
         break;
     }
-
-    case STATE_SETTINGS:
-        run_settings();
-        state = STATE_MAIN_MENU;
-        break;
-
-    case STATE_ABOUT:
-        ui_about();
-        state = STATE_MAIN_MENU;
-        break;
 
     default:
         state = STATE_MAIN_MENU;
